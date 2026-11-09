@@ -1,0 +1,2374 @@
+/* ==================== FONT GENSHIN IMPACT CHÍNH THỨC (HYWenHei-85W / SDK_SC_Web) ==================== */
+@font-face {
+  font-family: 'GenshinFont';
+  src:
+    url('../sprites/fonts/ja-jp.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --lol-bg: #010a13;
+  --lol-panel: #091428;
+  --lol-gold-bright: #f0e6d2;
+  --lol-gold: #c8aa6e;
+  --lol-gold-mid: #785a28;
+  --lol-gold-dark: #463714;
+  --lol-grey: #a09b8c;
+  --lol-grey-dark: #3c3c41;
+  --lol-btn-bg: #1e2328;
+
+  --lol-blue: #0ac8b9;
+  --lol-blue-mid: #0397ab;
+  --lol-blue-dark: #005a82;
+
+  --lol-red: #e84057;
+  --lol-red-bright: #ff4e50;
+  --lol-red-dark: #781727;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--lol-bg);
+  color: var(--lol-gold-bright);
+  font-family: 'GenshinFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font-family: 'GenshinFont', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.text-blue {
+  color: var(--lol-blue) !important;
+}
+
+.text-red {
+  color: var(--lol-red-bright) !important;
+}
+
+/* ==================== MÀN HÌNH & THANH LOADING HEXTECH ==================== */
+.lol-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background:
+    radial-gradient(circle at 50% 45%, rgba(9, 20, 40, 0.96) 0%, #010a13 78%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  transition: opacity 0.45s ease, visibility 0.45s ease;
+}
+
+.lol-loading-overlay.is-loaded {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.lol-loading-emblem {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lol-loading-spinner {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 14px rgba(10, 200, 185, 0.45));
+}
+
+.ld-ring-outer {
+  transform-origin: 70px 70px;
+  animation: spinCW 9s linear infinite;
+}
+
+.ld-ring-mid {
+  transform-origin: 70px 70px;
+  animation: spinCCW 5s linear infinite;
+}
+
+.lol-loading-pct {
+  position: absolute;
+  font-size: 20px;
+  color: var(--lol-gold-bright);
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 14px rgba(10, 200, 185, 0.75);
+}
+
+.lol-loading-bar-frame {
+  width: 380px;
+  max-width: 84vw;
+  padding: 3px;
+  background: linear-gradient(90deg, #463714 0%, #c8aa6e 50%, #463714 100%);
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.9), 0 0 16px rgba(200, 170, 110, 0.3);
+}
+
+.lol-loading-bar-track {
+  width: 100%;
+  height: 10px;
+  background: #010a13;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+  position: relative;
+  overflow: hidden;
+}
+
+.lol-loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  background:
+    repeating-linear-gradient(-45deg,
+      rgba(255, 255, 255, 0.14) 0px,
+      rgba(255, 255, 255, 0.14) 6px,
+      transparent 6px,
+      transparent 12px),
+    linear-gradient(90deg, #005a82 0%, #0ac8b9 70%, #b8fff9 100%);
+  box-shadow: 0 0 16px #0ac8b9;
+  position: relative;
+  transition: width 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lol-loading-bar-flare {
+  position: absolute;
+  right: -4px;
+  top: 50%;
+  width: 10px;
+  height: 18px;
+  transform: translateY(-50%);
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 12px #ffffff, 0 0 22px #0ac8b9;
+}
+
+/* ==================== LỚP NỀN SPLASH ART + ĐẠI TINH BÀN XOAY 6 TẦNG + HIỆU ỨNG ==================== */
+.lol-backdrop-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  perspective: 1100px;
+}
+
+.lol-backdrop-splash {
+  position: absolute;
+  inset: -24px;
+  background-size: cover;
+  background-position: center 18%;
+  opacity: 0.27;
+  filter: blur(6px) saturate(1.2);
+  transition: background-image 0.45s ease-in-out, opacity 0.4s ease, filter 0.4s ease;
+}
+
+.lol-backdrop-splash img.backdrop-splash-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 18%;
+  display: block;
+}
+
+body.spectator-fullscreen .lol-backdrop-splash {
+  opacity: 0.42;
+  filter: blur(2.5px) saturate(1.3);
+}
+
+.lol-backdrop-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(9, 20, 40, 0.2) 0%, rgba(1, 10, 19, 0.92) 74%),
+    linear-gradient(180deg, rgba(1, 10, 19, 0.88) 0%, transparent 22%, transparent 78%, rgba(1, 10, 19, 0.96) 100%);
+}
+
+.elemental-ambient-glow {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  width: 680px;
+  height: 680px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(10, 200, 185, 0.16) 0%, rgba(200, 170, 110, 0.08) 45%, transparent 72%);
+  filter: blur(24px);
+  animation: pulseAmbient 4.5s ease-in-out infinite alternate;
+  transition: background 0.5s ease;
+}
+
+/* 6 Vòng Tròn Tinh Bàn Đồng Tâm Xoay Ngược Chiều Nhau */
+.hextech-astrolabe {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  width: 660px;
+  height: 660px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-style: preserve-3d;
+  transition: width 0.45s ease, height 0.45s ease;
+}
+
+body.spectator-fullscreen .hextech-astrolabe {
+  width: 750px;
+  height: 750px;
+}
+
+.astro-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 8px rgba(200, 170, 110, 0.2));
+}
+
+.ring-outer {
+  animation: spinCW 48s linear infinite;
+}
+
+.ring-runes {
+  animation: spinCCW 30s linear infinite;
+}
+
+.ring-geometry {
+  animation: spinCW 36s linear infinite;
+}
+
+.ring-star {
+  animation: spinCCW 24s linear infinite;
+}
+
+.ring-orbit {
+  animation: spinCW 14s linear infinite;
+}
+
+.ring-core {
+  animation: spinCCW 18s linear infinite;
+}
+
+.lockin-shockwave {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  border: 3px solid var(--lol-gold-bright);
+  box-shadow: 0 0 45px var(--lol-blue), inset 0 0 35px var(--lol-gold);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lockin-shockwave.shockwave-secondary {
+  border: 2px dashed var(--lol-blue);
+  box-shadow: 0 0 35px var(--lol-gold-bright);
+}
+
+.screen-flash-fx {
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(circle at 50% 50%, rgba(240, 230, 210, 0.45) 0%, transparent 70%);
+}
+
+.screen-slash-fx {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 150vw;
+  height: 6px;
+  transform: translate(-50%, -50%) rotate(-18deg) scaleX(0);
+  background: linear-gradient(90deg, transparent 0%, #ffffff 35%, #0ac8b9 50%, #ffffff 65%, transparent 100%);
+  box-shadow: 0 0 32px #0ac8b9, 0 0 64px #c8aa6e;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.hextech-particles {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@keyframes spinCW {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes spinCCW {
+  from {
+    transform: rotate(360deg);
+  }
+
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes sweepBeam {
+  0% {
+    transform: translateX(-130%) skewX(-25deg);
+  }
+
+  100% {
+    transform: translateX(240%) skewX(-25deg);
+  }
+}
+
+@keyframes pulseAmbient {
+  0% {
+    transform: translate(-50%, -50%) scale(0.92);
+    opacity: 0.75;
+  }
+
+  100% {
+    transform: translate(-50%, -50%) scale(1.08);
+    opacity: 1;
+  }
+}
+
+@keyframes floatShowcase {
+  0% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-7px);
+  }
+
+  100% {
+    transform: translateY(0px);
+  }
+}
+
+/* ==================== THANH SYSTEM BAR TRÊN CÙNG (34PX) ==================== */
+.client-sysbar {
+  position: relative;
+  z-index: 40;
+  height: 34px;
+  background: #010a13;
+  border-bottom: 1px solid var(--lol-gold-dark);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  gap: 8px;
+}
+
+.sysbar-left,
+.sysbar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sys-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--lol-btn-bg);
+  border: 1px solid var(--lol-gold-mid);
+  color: var(--lol-gold-bright);
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sys-btn:hover {
+  border-color: var(--lol-gold-bright);
+  background: #283038;
+}
+
+.sys-btn-highlight {
+  background: linear-gradient(180deg, #0d2b36 0%, #05161e 100%);
+  border-color: var(--lol-blue);
+  color: var(--lol-gold-bright);
+}
+
+.sys-btn-highlight.active-fullscreen {
+  background: linear-gradient(180deg, var(--lol-blue-mid) 0%, var(--lol-blue-dark) 100%);
+  border-color: var(--lol-gold-bright);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(10, 200, 185, 0.5);
+}
+
+.sys-match-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 24px;
+  background: rgba(9, 20, 40, 0.8);
+  border: 1px solid var(--lol-gold-dark);
+  font-size: 10.5px;
+}
+
+.sys-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--lol-blue);
+  box-shadow: 0 0 6px var(--lol-blue);
+}
+
+.sys-dot.offline {
+  background: var(--lol-red);
+  box-shadow: 0 0 6px var(--lol-red);
+}
+
+.sys-label {
+  color: var(--lol-grey);
+  font-size: 9.5px;
+}
+
+.sys-sync-tag {
+  font-size: 9px;
+  color: var(--lol-blue);
+  padding-left: 4px;
+  border-left: 1px solid var(--lol-gold-dark);
+}
+
+.sys-btc-controls,
+.sys-player-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sys-action-btn {
+  height: 24px;
+  padding: 0 8px;
+  background: var(--lol-btn-bg);
+  border: 1px solid var(--lol-gold-dark);
+  color: var(--lol-gold);
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sys-action-btn:hover:not(:disabled) {
+  border-color: var(--lol-gold-bright);
+  color: var(--lol-gold-bright);
+}
+
+.sys-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sys-btn-gold {
+  background: linear-gradient(180deg, #3c321b 0%, #1e190d 100%);
+  border-color: var(--lol-gold);
+  color: var(--lol-gold-bright);
+}
+
+.sys-btn-red {
+  background: rgba(120, 23, 39, 0.35);
+  border-color: var(--lol-red);
+  color: #ff9aa6;
+}
+
+.sys-player-tag {
+  font-size: 10px;
+  padding: 2px 8px;
+  background: var(--lol-blue-dark);
+  border: 1px solid var(--lol-blue);
+  color: #fff;
+}
+
+.sys-player-tag.side-b {
+  background: var(--lol-red-dark);
+  border-color: var(--lol-red);
+}
+
+.sys-player-hint {
+  font-size: 10px;
+  color: var(--lol-grey);
+  margin: 0 4px;
+}
+
+.bgm-controller {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  height: 24px;
+  background: rgba(9, 20, 40, 0.7);
+  border: 1px solid var(--lol-gold-dark);
+}
+
+.sys-icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--lol-gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.bgm-select {
+  background: transparent;
+  border: none;
+  color: var(--lol-gold-bright);
+  font-size: 10px;
+  outline: none;
+  cursor: pointer;
+}
+
+.bgm-select option {
+  background: #010a13;
+  color: var(--lol-gold-bright);
+}
+
+.bgm-slider {
+  width: 52px;
+  height: 3px;
+  accent-color: var(--lol-gold);
+  cursor: pointer;
+}
+
+.role-switcher {
+  display: inline-flex;
+  height: 24px;
+  border: 1px solid var(--lol-gold-dark);
+}
+
+.role-btn {
+  border: none;
+  background: #050d18;
+  color: var(--lol-grey);
+  padding: 0 8px;
+  font-size: 9.5px;
+  cursor: pointer;
+  border-right: 1px solid var(--lol-gold-dark);
+}
+
+.role-btn:last-child {
+  border-right: none;
+}
+
+.role-btn.active {
+  background: var(--lol-gold-mid);
+  color: var(--lol-gold-bright);
+}
+
+.player-locked-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--lol-red);
+  color: #ff9aa6;
+  background: rgba(232, 64, 87, 0.15);
+}
+
+/* ==================== BỐ CỤC CHÍNH CLIENT LMHT ==================== */
+.lol-client-viewport {
+  position: relative;
+  z-index: 10;
+  height: calc(100vh - 34px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* 1. HEADER ĐẦU BẢNG CÓ 10 Ô CẤM (5 TRÁI + 5 PHẢI) ĐẶT TRÊN ĐẦU DỄ NHÌN */
+.lol-header-bar {
+  height: 78px;
+  display: grid;
+  grid-template-columns: 1fr 290px 1fr;
+  align-items: end;
+  padding: 6px 16px 0;
+  position: relative;
+  background: linear-gradient(180deg, rgba(1, 10, 19, 0.92) 0%, rgba(1, 10, 19, 0.35) 100%);
+}
+
+.lol-header-team {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.header-top-flex {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.header-top-flex.row-reverse {
+  flex-direction: row-reverse;
+}
+
+.header-identity-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.align-right {
+  text-align: right;
+}
+
+.header-team-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.justify-end {
+  justify-content: flex-end;
+}
+
+.header-team-name {
+  font-size: 19px;
+  letter-spacing: 1px;
+  color: var(--lol-gold-bright);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+}
+
+.header-side-sub {
+  font-size: 9.5px;
+  color: var(--lol-gold);
+  letter-spacing: 1.2px;
+}
+
+.header-ready-tag {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border: 1px solid var(--lol-blue);
+  color: var(--lol-blue);
+  background: rgba(10, 200, 185, 0.14);
+}
+
+/* DẢI 5 Ô CẤM ĐẶT TRÊN ĐẦU MỖI ĐỘI */
+.top-ban-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.top-ban-label {
+  font-size: 10px;
+  color: var(--lol-red-bright);
+  letter-spacing: 1px;
+}
+
+.ban-slots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ban-slot {
+  width: 44px;
+  height: 44px;
+  background: #040b14;
+  border: 1px solid var(--lol-gold-mid);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+/* Chia cụm 3 + 2 cho 5 ô cấm giống LMHT */
+.ban-slot.phase-divider-after {
+  margin-right: 10px;
+}
+
+/* Hiệu ứng vòng xoay đỏ/vàng khi đang tới lượt ô Cấm đó */
+.ban-slot.active-ban-slot {
+  border: 2px solid var(--lol-red-bright);
+  box-shadow: 0 0 14px rgba(232, 64, 87, 0.85);
+  transform: scale(1.06);
+}
+
+.ban-slot.active-ban-slot::before {
+  content: '';
+  position: absolute;
+  inset: -12px;
+  border: 2px dashed rgba(255, 78, 80, 0.8);
+  border-radius: 50%;
+  animation: spinCW 5s linear infinite;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.ban-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(80%) contrast(1.1);
+}
+
+.ban-slot .ban-slash {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg,
+      transparent 44%,
+      rgba(232, 64, 87, 0.92) 46%,
+      rgba(232, 64, 87, 0.92) 54%,
+      transparent 56%);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ban-slot-num {
+  font-size: 10px;
+  color: rgba(200, 170, 110, 0.3);
+}
+
+/* Thanh thời gian Loading đếm ngược chuẩn Client LMHT dưới mỗi đội */
+@keyframes hextechBarFlow {
+  0% {
+    background-position: 0 0, 0 0;
+  }
+
+  100% {
+    background-position: 28px 0, 0 0;
+  }
+}
+
+.lol-header-team.team-turn-active .header-team-name {
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(240, 230, 210, 0.8), 0 2px 8px rgba(0, 0, 0, 0.95);
+}
+
+.header-progress-track {
+  width: 100%;
+  height: 6px;
+  background: linear-gradient(90deg, rgba(9, 20, 40, 0.9) 0%, rgba(4, 11, 20, 0.95) 100%);
+  border-top: 1px solid rgba(200, 170, 110, 0.45);
+  border-bottom: 1px solid rgba(120, 90, 40, 0.65);
+  position: relative;
+  overflow: visible;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+.header-progress-fill {
+  height: 100%;
+  width: 0%;
+  position: relative;
+  transition: width 1s linear;
+}
+
+.header-progress-fill .progress-flare {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 14px;
+  transform: translateY(-50%) rotate(45deg);
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.header-progress-fill.is-active .progress-flare {
+  opacity: 1;
+}
+
+.fill-blue {
+  background-image:
+    repeating-linear-gradient(-55deg,
+      rgba(255, 255, 255, 0.18) 0px,
+      rgba(255, 255, 255, 0.18) 7px,
+      transparent 7px,
+      transparent 14px),
+    linear-gradient(90deg, #004466 0%, #0397ab 45%, #0ac8b9 85%, #d6ffff 100%);
+  background-size: 28px 100%, 100% 100%;
+  animation: hextechBarFlow 0.9s linear infinite;
+  box-shadow: 0 0 14px rgba(10, 200, 185, 0.9), 0 0 28px rgba(10, 200, 185, 0.45);
+  margin-left: auto;
+}
+
+.fill-blue .progress-flare {
+  left: -4px;
+  box-shadow: 0 0 10px #ffffff, 0 0 20px #0ac8b9, 0 0 32px #0ac8b9;
+}
+
+.fill-red {
+  background-image:
+    repeating-linear-gradient(55deg,
+      rgba(255, 255, 255, 0.18) 0px,
+      rgba(255, 255, 255, 0.18) 7px,
+      transparent 7px,
+      transparent 14px),
+    linear-gradient(270deg, #5e0f1c 0%, #c9253d 45%, #ff4e50 85%, #ffe3e6 100%);
+  background-size: 28px 100%, 100% 100%;
+  animation: hextechBarFlow 0.9s linear infinite;
+  box-shadow: 0 0 14px rgba(255, 78, 80, 0.9), 0 0 28px rgba(232, 64, 87, 0.45);
+}
+
+.fill-red .progress-flare {
+  right: -4px;
+  box-shadow: 0 0 10px #ffffff, 0 0 20px #ff4e50, 0 0 32px #e84057;
+}
+
+.header-progress-fill.is-urgent {
+  background-image:
+    repeating-linear-gradient(-55deg,
+      rgba(255, 255, 255, 0.28) 0px,
+      rgba(255, 255, 255, 0.28) 7px,
+      transparent 7px,
+      transparent 14px),
+    linear-gradient(90deg, #781727 0%, #e84057 50%, #ff9a44 90%, #ffffff 100%);
+  box-shadow: 0 0 18px #ff4e50, 0 0 34px rgba(255, 78, 80, 0.8);
+}
+
+.dial-progress-bar,
+.dial-progress-bar {
+  transition: stroke-dashoffset 1s linear, stroke 0.3s ease;
+  filter: drop-shadow(0 0 5px currentColor);
+}
+
+/* ĐỒNG HỒ TRUNG TÂM CÓ 3 VÒNG XOAY NGƯỢC CHIỀU */
+.lol-header-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  text-align: center;
+  padding-bottom: 2px;
+}
+
+.timer-dial-wrapper {
+  position: relative;
+  width: 60px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.timer-rotating-ring {
+  position: absolute;
+  width: 74px;
+  height: 74px;
+  top: -14px;
+  left: -7px;
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px rgba(10, 200, 185, 0.35));
+}
+
+.dial-ring-1 {
+  transform-origin: 60px 60px;
+  animation: spinCW 12s linear infinite;
+}
+
+.dial-ring-2 {
+  transform-origin: 60px 60px;
+  animation: spinCCW 8s linear infinite;
+}
+
+.dial-ring-3 {
+  transform-origin: 60px 60px;
+  animation: spinCW 5s linear infinite;
+}
+
+.center-timer-number {
+  position: relative;
+  z-index: 2;
+  font-size: 28px;
+  line-height: 1;
+  color: var(--lol-gold-bright);
+  text-shadow: 0 0 16px rgba(200, 170, 110, 0.75);
+}
+
+.center-timer-number.urgent {
+  color: var(--lol-red-bright);
+  text-shadow: 0 0 22px var(--lol-red);
+}
+
+.center-phase-title {
+  font-size: 11.5px;
+  letter-spacing: 1.5px;
+  color: var(--lol-gold-bright);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.center-phase-title:empty {
+  display: none;
+}
+
+.center-phase-title.pill-ban {
+  color: var(--lol-red-bright);
+}
+
+.center-phase-title.pill-pick {
+  color: var(--lol-blue);
+}
+
+.center-sub-instruction {
+  font-size: 10px;
+  color: var(--lol-grey);
+}
+
+.center-sub-instruction:empty {
+  display: none;
+}
+
+/* Dải tiến trình 18 bước */
+.lol-sequence-strip {
+  height: 18px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 16px;
+}
+
+.seq-chip {
+  flex: 1;
+  height: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 8.5px;
+  color: rgba(240, 230, 210, 0.42);
+  background: rgba(9, 20, 40, 0.55);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.seq-chip.done {
+  opacity: 0.28;
+}
+
+.seq-chip.active {
+  color: var(--lol-gold-bright);
+  background: rgba(200, 170, 110, 0.22);
+  border-bottom-color: var(--lol-gold);
+}
+
+.seq-chip.seq-team-a.active {
+  border-bottom-color: var(--lol-blue);
+  color: var(--lol-blue);
+}
+
+.seq-chip.seq-team-b.active {
+  border-bottom-color: var(--lol-red-bright);
+  color: var(--lol-red-bright);
+}
+
+/* ==================== SÂN KHẤU 3 CỘT & CHẾ ĐỘ NGƯỜI XEM FULL MÀN HÌNH ==================== */
+.lol-main-stage {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 330px 1fr 330px;
+  gap: 14px;
+  padding: 4px 0 0;
+  transition: grid-template-columns 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Khi Người Xem / BTC bấm "ẨN BẢNG TƯỚNG (FULL MÀN HÌNH)": 2 cột 2 bên mở rộng cực đại, ở giữa hiện Vòng Xoay & Tướng Spotlight */
+body.spectator-fullscreen .lol-main-stage {
+  grid-template-columns: 440px 1fr 440px;
+}
+
+body.spectator-fullscreen .ban-slot {
+  width: 50px;
+  height: 50px;
+}
+
+.lol-team-column {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+
+.lol-half-divider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 14px;
+  background: linear-gradient(90deg, rgba(200, 170, 110, 0.18) 0%, transparent 100%);
+  border-top: 1px solid var(--lol-gold-dark);
+  border-bottom: 1px solid var(--lol-gold-dark);
+  font-size: 10px;
+  color: var(--lol-gold);
+  letter-spacing: 0.8px;
+}
+
+.lol-half-divider.divider-right {
+  background: linear-gradient(270deg, rgba(200, 170, 110, 0.18) 0%, transparent 100%);
+}
+
+.lol-half-divider small {
+  font-size: 9px;
+  color: var(--lol-grey);
+}
+
+.lol-slots-group {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  justify-content: space-evenly;
+}
+
+/* Ô TƯỚNG (PICK SLOT ROW) CHUẨN CLIENT LMHT + HIỆU ỨNG VÒNG XOAY HEXTECH */
+.pick-slot-card {
+  position: relative;
+  height: calc((100vh - 210px) / 8);
+  min-height: 54px;
+  max-height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 14px;
+  background: linear-gradient(90deg, rgba(9, 20, 40, 0.9) 0%, rgba(1, 10, 19, 0.45) 100%);
+  border-bottom: 1px solid rgba(120, 90, 40, 0.4);
+  overflow: hidden;
+  transition: all 0.22s ease;
+}
+
+.col-red .pick-slot-card {
+  flex-direction: row-reverse;
+  text-align: right;
+  background: linear-gradient(270deg, rgba(9, 20, 40, 0.9) 0%, rgba(1, 10, 19, 0.45) 100%);
+}
+
+.slot-bg-watermark {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 22%;
+  opacity: 0.28;
+  pointer-events: none;
+  mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.95) 25%, transparent 98%);
+  -webkit-mask-image: linear-gradient(90deg, rgba(0, 0, 0, 0.95) 25%, transparent 98%);
+  transition: opacity 0.3s ease, transform 0.4s ease;
+}
+
+body.spectator-fullscreen .slot-bg-watermark {
+  opacity: 0.38;
+}
+
+.col-red .slot-bg-watermark {
+  mask-image: linear-gradient(270deg, rgba(0, 0, 0, 0.95) 25%, transparent 98%);
+  -webkit-mask-image: linear-gradient(270deg, rgba(0, 0, 0, 0.95) 25%, transparent 98%);
+}
+
+.pick-slot-card.interactive-slot {
+  cursor: pointer;
+}
+
+.pick-slot-card.interactive-slot:hover .slot-bg-watermark {
+  transform: scale(1.05);
+  opacity: 0.42;
+}
+
+/* HIỆU ỨNG LUỒNG SÁNG QUÉT + VÒNG XOAY KHI ĐẾN LƯỢT Ô PICK ĐÓ */
+.pick-slot-card.active-pick-slot {
+  border-top: 1px solid var(--lol-gold-bright);
+  border-bottom: 1px solid var(--lol-gold-bright);
+  background: linear-gradient(90deg, rgba(10, 200, 185, 0.28) 0%, transparent 95%);
+  box-shadow: inset 4px 0 0 var(--lol-gold-bright);
+}
+
+.col-red .pick-slot-card.active-pick-slot {
+  background: linear-gradient(270deg, rgba(232, 64, 87, 0.28) 0%, transparent 95%);
+  box-shadow: inset -4px 0 0 var(--lol-gold-bright);
+}
+
+.pick-slot-card.active-pick-slot::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 90px;
+  background: linear-gradient(90deg, transparent, rgba(240, 230, 210, 0.22), transparent);
+  animation: sweepBeam 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.pick-slot-card.selected-for-swap {
+  background: rgba(10, 200, 185, 0.26) !important;
+  outline: 1px dashed var(--lol-blue);
+}
+
+/* Vòng Tròn Avatar + Vành Xoay Kép Ngược Chiều Quanh Avatar Khi Đang Chọn */
+.slot-avatar-wrap {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #040b14;
+  border: 2px solid var(--lol-gold);
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.85);
+}
+
+.pick-slot-card.active-pick-slot .slot-avatar-wrap {
+  border-color: var(--lol-blue);
+  box-shadow: 0 0 18px var(--lol-blue);
+}
+
+.pick-slot-card.active-pick-slot .slot-avatar-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  border: 1.5px dotted rgba(10, 200, 185, 0.85);
+  animation: spinCCW 9s linear infinite;
+  pointer-events: none;
+}
+
+.pick-slot-card.active-pick-slot .slot-avatar-wrap::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px dashed var(--lol-gold-bright);
+  animation: spinCW 5s linear infinite;
+  pointer-events: none;
+}
+
+.slot-avatar-wrap img {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.slot-index-num {
+  font-size: 12px;
+  color: rgba(200, 170, 110, 0.45);
+}
+
+.slot-element-badge {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(1, 10, 19, 0.92);
+  border: 1px solid var(--lol-gold-mid);
+  padding: 1.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+
+.col-red .slot-element-badge {
+  left: auto;
+  right: -3px;
+}
+
+.slot-element-badge img.char-el-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.slot-constellation-badge {
+  position: absolute;
+  bottom: -3px;
+  right: -4px;
+  padding: 0 4px;
+  font-size: 9.5px;
+  background: #010a13;
+  color: var(--lol-gold-bright);
+  border: 1px solid var(--lol-gold);
+  z-index: 3;
+}
+
+.col-red .slot-constellation-badge {
+  right: auto;
+  left: -4px;
+}
+
+.slot-constellation-badge.is-c6 {
+  background: #8c182b;
+  color: #fde68a;
+  border-color: var(--lol-gold-bright);
+}
+
+.slot-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 2;
+}
+
+.col-red .slot-info {
+  align-items: flex-end;
+}
+
+.slot-char-name {
+  font-size: 13.5px;
+  color: var(--lol-gold-bright);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95);
+}
+
+.slot-empty-text {
+  font-size: 11.5px;
+  color: var(--lol-grey);
+}
+
+.slot-weapon-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--lol-gold);
+  max-width: 100%;
+}
+
+.col-red .slot-weapon-row {
+  flex-direction: row-reverse;
+}
+
+.slot-weapon-row img {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--lol-gold-mid);
+  background: #010a13;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.slot-weapon-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--lol-grey);
+}
+
+.slot-refine-tag {
+  font-size: 9.5px;
+  color: var(--lol-gold-bright);
+  border: 1px solid var(--lol-gold-dark);
+  background: rgba(1, 10, 19, 0.8);
+  padding: 0 3px;
+}
+
+.slot-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  z-index: 2;
+  opacity: 0.78;
+}
+
+.pick-slot-card:hover .slot-actions {
+  opacity: 1;
+}
+
+.btn-slot-action {
+  padding: 2px 6px;
+  font-size: 9.5px;
+  border: 1px solid var(--lol-gold-mid);
+  background: rgba(1, 10, 19, 0.88);
+  color: var(--lol-gold-bright);
+  cursor: pointer;
+}
+
+.btn-slot-action:hover {
+  background: var(--lol-gold);
+  color: #010a13;
+}
+
+/* ==================== CỘT GIỮA: BẢNG TƯỚNG & KHUNG TRÌNH CHIẾU FULL MÀN HÌNH ==================== */
+.lol-center-well {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  justify-content: space-between;
+  position: relative;
+}
+
+.champion-pool-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Khung Trình Chiếu Trung Tâm khi Người Xem ẩn bảng nhân vật (Full Màn Hình Cấm Chọn) */
+.spectator-center-showcase {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  pointer-events: none;
+}
+
+.showcase-ring-container {
+  position: relative;
+  width: 340px;
+  height: 340px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: floatShowcase 5s ease-in-out infinite;
+}
+
+.showcase-orbit-svg {
+  position: absolute;
+  width: 404px;
+  height: 404px;
+  top: -32px;
+  left: -32px;
+  pointer-events: none;
+  z-index: 4;
+  filter: drop-shadow(0 0 8px rgba(10, 200, 185, 0.4));
+}
+
+.sc-ring-1 {
+  transform-origin: 210px 210px;
+  animation: spinCW 22s linear infinite;
+}
+
+.sc-ring-2 {
+  transform-origin: 210px 210px;
+  animation: spinCCW 15s linear infinite;
+}
+
+.sc-ring-3 {
+  transform-origin: 210px 210px;
+  animation: spinCW 9s linear infinite;
+}
+
+.showcase-avatar-disc {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2.5px solid var(--lol-gold);
+  box-shadow: 0 0 60px rgba(10, 200, 185, 0.35), inset 0 0 45px rgba(200, 170, 110, 0.3);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  background: radial-gradient(circle, rgba(9, 20, 40, 0.85) 0%, rgba(1, 10, 19, 0.96) 100%);
+  z-index: 2;
+}
+
+.showcase-char-art {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.showcase-char-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center center;
+  display: block;
+}
+
+.showcase-char-info {
+  position: relative;
+  z-index: 5;
+  width: 100%;
+  padding: 20px 16px 16px;
+  background: linear-gradient(180deg, transparent 0%, rgba(1, 10, 19, 0.88) 38%, rgba(1, 10, 19, 0.98) 100%);
+  text-align: center;
+}
+
+.showcase-action-tag {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--lol-blue);
+  text-transform: uppercase;
+}
+
+.showcase-char-name {
+  font-size: 20px;
+  color: var(--lol-gold-bright);
+  margin: 3px 0 2px;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+}
+
+.showcase-char-sub {
+  font-size: 11px;
+  color: var(--lol-grey);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+
+.showcase-el-img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
+}
+
+/* ==================== KHUNG 2 MÀN HÌNH STREAM KIỂU DISCORD (SAU 90 GIÂY) ==================== */
+.dual-stream-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 10px;
+  z-index: 15;
+}
+
+.dual-stream-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  background: rgba(9, 20, 40, 0.88);
+  border: 1px solid var(--lol-gold-mid);
+}
+
+.stream-lock-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--lol-gold-bright);
+  letter-spacing: 0.6px;
+}
+
+.stream-lock-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lol-red-bright);
+  box-shadow: 0 0 8px var(--lol-red-bright);
+}
+
+.dual-stream-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.dual-stream-grid.split-vertical {
+  grid-template-rows: 1fr 1fr;
+  grid-template-columns: 1fr;
+}
+
+.dual-stream-grid.split-horizontal {
+  grid-template-rows: 1fr;
+  grid-template-columns: 1fr 1fr;
+}
+
+.stream-screen-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: rgba(2, 9, 18, 0.92);
+  border: 1.5px solid var(--lol-gold-mid);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  position: relative;
+}
+
+.stream-card-blue {
+  border-color: rgba(10, 200, 185, 0.65);
+}
+
+.stream-card-red {
+  border-color: rgba(232, 64, 87, 0.65);
+}
+
+.stream-card-header {
+  height: 30px;
+  padding: 0 10px;
+  background: linear-gradient(90deg, rgba(9, 20, 40, 0.96) 0%, rgba(1, 10, 19, 0.92) 100%);
+  border-bottom: 1px solid rgba(200, 170, 110, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.stream-header-left,
+.stream-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stream-live-pill {
+  font-size: 9px;
+  padding: 2px 6px;
+  background: rgba(160, 155, 140, 0.18);
+  border: 1px solid var(--lol-grey-dark);
+  color: var(--lol-grey);
+  letter-spacing: 0.6px;
+}
+
+.stream-live-pill.is-live {
+  background: rgba(232, 64, 87, 0.25);
+  border-color: var(--lol-red-bright);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(232, 64, 87, 0.7);
+}
+
+.stream-team-label {
+  font-size: 12px;
+  letter-spacing: 0.8px;
+}
+
+.stream-ctrl-btn {
+  height: 22px;
+  padding: 0 8px;
+  background: #141c26;
+  border: 1px solid var(--lol-gold-dark);
+  color: var(--lol-gold-bright);
+  font-size: 9.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stream-ctrl-btn:hover {
+  border-color: var(--lol-gold-bright);
+  background: #1f2b3a;
+}
+
+.btn-discord-share {
+  background: linear-gradient(180deg, #5865f2 0%, #404eed 100%);
+  border-color: #7983f5;
+  color: #ffffff;
+}
+
+.btn-discord-share:hover {
+  background: linear-gradient(180deg, #6d78f7 0%, #4e5bf0 100%);
+  border-color: #ffffff;
+}
+
+.btn-discord-stop {
+  background: linear-gradient(180deg, #e84057 0%, #9e1c2e 100%);
+  border-color: #ff7588;
+  color: #ffffff;
+}
+
+.stream-viewport {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: radial-gradient(circle at 50% 50%, rgba(9, 20, 40, 0.75) 0%, #01060c 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.stream-video,
+.stream-iframe {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: none;
+  background: #000000;
+}
+
+.stream-empty-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  text-align: center;
+  z-index: 2;
+}
+
+.stream-discord-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(88, 101, 242, 0.16);
+  border: 1.5px solid rgba(88, 101, 242, 0.65);
+  color: #8ea1e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 24px rgba(88, 101, 242, 0.35);
+}
+
+.stream-empty-title {
+  font-size: 12.5px;
+  color: var(--lol-gold-bright);
+  letter-spacing: 1px;
+}
+
+.btn-big-discord-share {
+  height: 34px;
+  padding: 0 18px;
+  background: linear-gradient(180deg, #5865f2 0%, #404eed 100%);
+  border: 1px solid #99a2ff;
+  color: #ffffff;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  cursor: pointer;
+  box-shadow: 0 0 18px rgba(88, 101, 242, 0.5);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-big-discord-share:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 26px rgba(88, 101, 242, 0.85);
+}
+
+.stream-embed-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 320px;
+  max-width: 90%;
+  margin-top: 2px;
+}
+
+.stream-url-input {
+  flex: 1;
+  height: 24px;
+  padding: 0 8px;
+  background: rgba(1, 10, 19, 0.9);
+  border: 1px solid var(--lol-gold-dark);
+  color: var(--lol-gold-bright);
+  font-size: 10px;
+  outline: none;
+}
+
+.lol-lineup-notice {
+  padding: 6px 12px;
+  margin-bottom: 6px;
+  background: rgba(10, 200, 185, 0.14);
+  border: 1px solid var(--lol-blue);
+  font-size: 11px;
+  color: var(--lol-gold-bright);
+}
+
+.lol-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--lol-gold-dark);
+  gap: 10px;
+}
+
+.lol-role-icons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.role-icon-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--lol-grey);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-el-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  opacity: 0.72;
+  transition: transform 0.15s ease, opacity 0.15s ease, filter 0.15s ease;
+}
+
+.role-icon-btn:hover .filter-el-img {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.role-icon-btn.active .filter-el-img {
+  opacity: 1;
+  transform: scale(1.14);
+  filter: drop-shadow(0 0 6px rgba(240, 230, 210, 0.65));
+}
+
+.role-icon-btn:hover {
+  color: var(--lol-gold-bright);
+}
+
+.role-icon-btn.active {
+  color: var(--lol-gold-bright);
+  border-bottom-color: var(--lol-gold);
+}
+
+.lol-search-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lol-select {
+  height: 26px;
+  padding: 0 8px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-mid);
+  color: var(--lol-gold-bright);
+  font-size: 10.5px;
+  outline: none;
+}
+
+.lol-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 185px;
+  height: 26px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-mid);
+}
+
+.search-svg {
+  margin-left: 7px;
+  color: var(--lol-gold);
+  flex-shrink: 0;
+}
+
+#charSearchInput {
+  width: 100%;
+  height: 100%;
+  padding: 0 22px 0 6px;
+  background: transparent;
+  border: none;
+  color: var(--lol-gold-bright);
+  font-size: 11px;
+  outline: none;
+}
+
+.btn-clear-search {
+  position: absolute;
+  right: 6px;
+  background: transparent;
+  border: none;
+  color: var(--lol-grey);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+/* LƯỚI TƯỚNG TRUNG TÂM */
+.character-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(74px, 1fr));
+  gap: 9px 8px;
+  padding: 4px 6px 8px 2px;
+  align-content: start;
+}
+
+.character-grid::-webkit-scrollbar {
+  width: 5px;
+}
+
+.character-grid::-webkit-scrollbar-track {
+  background: rgba(1, 10, 19, 0.6);
+}
+
+.character-grid::-webkit-scrollbar-thumb {
+  background: var(--lol-gold-mid);
+}
+
+.char-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.char-portrait {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #091428;
+  border: 1px solid var(--lol-grey-dark);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.char-card:hover:not(.char-disabled) .char-portrait {
+  border-color: var(--lol-gold-bright);
+  box-shadow: 0 0 12px rgba(240, 230, 210, 0.4);
+  transform: translateY(-2px);
+}
+
+.char-card.char-hovered .char-portrait {
+  border: 2px solid var(--lol-gold-bright);
+  box-shadow: 0 0 16px var(--lol-blue);
+}
+
+.char-card.char-disabled {
+  cursor: not-allowed;
+  opacity: 0.28;
+  filter: grayscale(100%);
+}
+
+.char-portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.char-el-tag {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(1, 10, 19, 0.72);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.char-el-tag img.char-el-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.char-status-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9.5px;
+  background: rgba(1, 10, 19, 0.78);
+  color: var(--lol-gold-bright);
+}
+
+.char-status-overlay.status-banned {
+  color: var(--lol-red-bright);
+}
+
+.char-card-name {
+  width: 100%;
+  font-size: 10.5px;
+  color: var(--lol-grey);
+  text-align: center;
+  padding-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* DOCK NÚT KHÓA DƯỚI CÙNG */
+.lol-bottom-dock {
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0 8px;
+  border-top: 1px solid rgba(200, 170, 110, 0.25);
+}
+
+.dock-lockin-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.hovered-mini-name {
+  font-size: 10.5px;
+  color: var(--lol-gold);
+  height: 14px;
+}
+
+.dock-lockin-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-skip-ban {
+  height: 36px;
+  padding: 0 12px;
+  background: #1e2328;
+  border: 1px solid var(--lol-red);
+  color: #ff9aa6;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lol-lockin-btn {
+  width: 184px;
+  height: 38px;
+  background: linear-gradient(180deg, #1e282d 0%, #11171a 100%);
+  border: 2px solid var(--lol-blue);
+  color: var(--lol-gold-bright);
+  font-size: 14px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  clip-path: polygon(12px 0, calc(100% - 12px) 0, 100% 50%, calc(100% - 12px) 100%, 12px 100%, 0 50%);
+  box-shadow: 0 0 16px rgba(10, 200, 185, 0.4);
+  transition: all 0.15s ease;
+}
+
+.lol-lockin-btn:hover:not(:disabled) {
+  background: linear-gradient(180deg, #0ac8b9 0%, #005a82 100%);
+  color: #ffffff;
+  box-shadow: 0 0 24px rgba(10, 200, 185, 0.85);
+}
+
+.lol-lockin-btn.is-ban-lock:not(:disabled) {
+  background: linear-gradient(180deg, #4d121d 0%, #24070d 100%);
+  border-color: var(--lol-red-bright);
+  box-shadow: 0 0 16px rgba(232, 64, 87, 0.5);
+}
+
+.lol-lockin-btn.is-ban-lock:hover:not(:disabled) {
+  background: linear-gradient(180deg, #e84057 0%, #8c182b 100%);
+  color: #ffffff;
+}
+
+.lol-lockin-btn:disabled {
+  background: #161a1e;
+  border-color: #3c3c41;
+  color: #5c5b57;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ==================== SẢNH CHÍNH (MAIN MENU OVERLAY) ==================== */
+.main-menu-overlay {
+  position: fixed;
+  top: 34px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(1, 10, 19, 0.96);
+  z-index: 200;
+  overflow-y: auto;
+  padding: 28px 24px;
+}
+
+.main-menu-container {
+  max-width: 1140px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.menu-hero-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--lol-gold-dark);
+}
+
+.menu-eyebrow {
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: var(--lol-gold);
+}
+
+.menu-title {
+  font-size: 24px;
+  color: var(--lol-gold-bright);
+  letter-spacing: 1px;
+  margin: 3px 0;
+}
+
+.menu-desc {
+  font-size: 12px;
+  color: var(--lol-grey);
+}
+
+.btn-return-match {
+  height: 36px;
+  padding: 0 18px;
+  background: var(--lol-btn-bg);
+  border: 1px solid var(--lol-gold);
+  color: var(--lol-gold-bright);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.menu-grid {
+  display: grid;
+  grid-template-columns: 440px 1fr;
+  gap: 20px;
+}
+
+.hextech-box {
+  background: #050e1b;
+  border: 1px solid var(--lol-gold-mid);
+  padding: 18px;
+}
+
+.box-title {
+  font-size: 15px;
+  color: var(--lol-gold-bright);
+  letter-spacing: 0.8px;
+}
+
+.box-subtitle {
+  font-size: 11.5px;
+  color: var(--lol-grey);
+  margin: 2px 0 14px;
+}
+
+.box-Header-flex {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.menu-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.input-with-btn,
+.join-by-id-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.join-by-id-bar {
+  margin-bottom: 12px;
+}
+
+.hextech-input,
+.modal-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-mid);
+  color: var(--lol-gold-bright);
+  font-size: 12px;
+  outline: none;
+}
+
+.btn-hextech-gold {
+  height: 38px;
+  background: linear-gradient(180deg, #c8aa6e 0%, #785a28 100%);
+  border: 1px solid var(--lol-gold-bright);
+  color: #010a13;
+  font-size: 12.5px;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.active-rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.room-list-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-dark);
+}
+
+.room-card-id {
+  font-size: 12px;
+  color: var(--lol-gold);
+}
+
+.room-card-teams {
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.room-card-meta {
+  font-size: 10.5px;
+  color: var(--lol-grey);
+}
+
+.room-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ==================== MODALS ==================== */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(1, 10, 19, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 620px;
+  background: #050e1b;
+  border: 1px solid var(--lol-gold);
+  display: flex;
+  flex-direction: column;
+  max-height: 88vh;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: #091428;
+  border-bottom: 1px solid var(--lol-gold-dark);
+}
+
+.modal-header h3 {
+  font-size: 14px;
+  color: var(--lol-gold-bright);
+}
+
+.modal-subtitle {
+  font-size: 11px;
+  color: var(--lol-grey);
+}
+
+.modal-close {
+  border: 1px solid var(--lol-gold-dark);
+  background: #010a13;
+  color: var(--lol-gold-bright);
+  width: 26px;
+  height: 26px;
+  cursor: pointer;
+}
+
+.modal-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.meta-char-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-dark);
+}
+
+.meta-char-summary img {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 1px solid var(--lol-gold);
+  object-fit: cover;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.form-label {
+  font-size: 11.5px;
+  color: var(--lol-gold);
+}
+
+.constellation-pills,
+.refine-pills {
+  display: flex;
+  gap: 6px;
+}
+
+.const-pill,
+.refine-pill {
+  padding: 6px 12px;
+  border: 1px solid var(--lol-gold-dark);
+  background: #010a13;
+  color: var(--lol-grey);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.const-pill.active,
+.refine-pill.active {
+  background: var(--lol-gold-mid);
+  color: var(--lol-gold-bright);
+  border-color: var(--lol-gold-bright);
+}
+
+.weapon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.weapon-option-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 7px;
+  border: 1px solid var(--lol-gold-dark);
+  background: #010a13;
+  cursor: pointer;
+}
+
+.weapon-option-card.selected {
+  border-color: var(--lol-blue);
+  background: rgba(10, 200, 185, 0.12);
+}
+
+.weapon-option-card img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.weapon-option-name {
+  font-size: 11px;
+  color: var(--lol-gold-bright);
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #091428;
+  border-top: 1px solid var(--lol-gold-dark);
+}
+
+.modal-footer-right {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.settings-grid-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 10px;
+}
+
+.share-links-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #010a13;
+  border: 1px solid var(--lol-gold-dark);
+}
+
+.share-link-row {
+  display: grid;
+  grid-template-columns: 155px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2000;
+}
+
+.toast {
+  background: #091428;
+  border: 1px solid var(--lol-gold);
+  color: var(--lol-gold-bright);
+  padding: 8px 14px;
+  font-size: 11.5px;
+}

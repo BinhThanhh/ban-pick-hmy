@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ban Pick</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+</head>
+
+<body>
+  <!-- ==================== MÀN HÌNH & THANH LOADING HEXTECH ==================== -->
+  <div class="lol-loading-overlay" id="lolLoadingOverlay">
+    <div class="lol-loading-emblem">
+      <svg class="lol-loading-spinner" viewBox="0 0 140 140">
+        <circle class="ld-ring-outer" cx="70" cy="70" r="62" fill="none" stroke="rgba(200,170,110,0.55)" stroke-width="1.8" stroke-dasharray="28 10 6 10" />
+        <circle class="ld-ring-mid" cx="70" cy="70" r="50" fill="none" stroke="rgba(10,200,185,0.75)" stroke-width="2.2" stroke-dasharray="44 18" />
+        <polygon points="70,18 82,48 114,60 82,72 70,102 58,72 26,60 58,48" fill="none" stroke="rgba(240,230,210,0.4)" stroke-width="1.2" transform="translate(0, 10)" />
+      </svg>
+      <div class="lol-loading-pct" id="lolLoadingPct">0%</div>
+    </div>
+    <div class="lol-loading-bar-frame">
+      <div class="lol-loading-bar-track">
+        <div class="lol-loading-bar-fill" id="lolLoadingBarFill">
+          <span class="lol-loading-bar-flare"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== LỚP NỀN SPLASH ART + ĐẠI TINH BÀN XOAY 6 TẦNG + HIỆU ỨNG HẠT & CHỚP SÁNG ==================== -->
+  <div class="lol-backdrop-layer" id="backdropLayer">
+    <div class="lol-backdrop-splash" id="backdropSplash"></div>
+    <div class="lol-backdrop-vignette"></div>
+    <div class="elemental-ambient-glow" id="elementalAmbientGlow"></div>
+
+    <!-- Hệ thống 6 Vòng Tròn Tinh Bàn Đồng Tâm Xoay Ngược Chiều + Lõi Năng Lượng -->
+    <div class="hextech-astrolabe" id="hextechAstrolabe">
+      <!-- Vòng 1: Vành La Bàn Đại Tinh Bàn Ngoài Cùng -->
+      <svg class="astro-ring ring-outer" viewBox="0 0 680 680">
+        <circle cx="340" cy="340" r="326" fill="none" stroke="rgba(200,170,110,0.26)" stroke-width="1.5"
+          stroke-dasharray="22 8 4 8 4 8" />
+        <circle cx="340" cy="340" r="312" fill="none" stroke="rgba(200,170,110,0.16)" stroke-width="1" />
+        <circle cx="340" cy="340" r="298" fill="none" stroke="rgba(10,200,185,0.15)" stroke-width="1"
+          stroke-dasharray="6 18" />
+        <path
+          d="M340 4 L348 24 L332 24 Z M340 676 L348 656 L332 656 Z M4 340 L24 348 L24 332 Z M676 340 L656 348 L656 332 Z"
+          fill="rgba(240,230,210,0.55)" />
+      </svg>
+
+      <!-- Vòng 2: Vành Tinh Tú Xoay Ngược Chiều -->
+      <svg class="astro-ring ring-runes" viewBox="0 0 680 680">
+        <circle cx="340" cy="340" r="272" fill="none" stroke="rgba(10,200,185,0.32)" stroke-width="2"
+          stroke-dasharray="4 12" />
+        <circle cx="340" cy="340" r="256" fill="none" stroke="rgba(200,170,110,0.32)" stroke-width="1.6"
+          stroke-dasharray="70 28 12 28" />
+        <polygon points="340,56 350,76 330,76" fill="rgba(10,200,185,0.55)" />
+        <polygon points="340,624 350,604 330,604" fill="rgba(10,200,185,0.55)" />
+        <polygon points="56,340 76,350 76,330" fill="rgba(10,200,185,0.55)" />
+        <polygon points="624,340 604,350 604,330" fill="rgba(10,200,185,0.55)" />
+      </svg>
+
+      <!-- Vòng 3: Bát Giác Ma Trận Tinh Không -->
+      <svg class="astro-ring ring-geometry" viewBox="0 0 680 680">
+        <rect x="150" y="150" width="380" height="380" fill="none" stroke="rgba(200,170,110,0.22)" stroke-width="1.3" />
+        <rect x="150" y="150" width="380" height="380" fill="none" stroke="rgba(10,200,185,0.18)" stroke-width="1.3"
+          transform="rotate(45 340 340)" />
+        <circle cx="340" cy="340" r="190" fill="none" stroke="rgba(240,230,210,0.28)" stroke-width="1.5"
+          stroke-dasharray="95 25" />
+      </svg>
+
+      <!-- Vòng 4: Ngôi Sao 8 Cánh Xoay Ngược -->
+      <svg class="astro-ring ring-star" viewBox="0 0 680 680">
+        <polygon points="340,120 385,295 560,340 385,385 340,560 295,385 120,340 295,295" fill="none"
+          stroke="rgba(200,170,110,0.24)" stroke-width="1.2" />
+        <polygon points="340,120 385,295 560,340 385,385 340,560 295,385 120,340 295,295" fill="none"
+          stroke="rgba(10,200,185,0.2)" stroke-width="1.2" transform="rotate(22.5 340 340)" />
+      </svg>
+
+      <!-- Vòng 5: Quỹ Đạo Kim Tuyến Nhanh -->
+      <svg class="astro-ring ring-orbit" viewBox="0 0 680 680">
+        <circle cx="340" cy="340" r="152" fill="none" stroke="rgba(240,230,210,0.38)" stroke-width="2"
+          stroke-dasharray="110 190" />
+        <circle cx="340" cy="188" r="4.5" fill="#f0e6d2" />
+        <circle cx="340" cy="492" r="4.5" fill="#0ac8b9" />
+      </svg>
+
+      <!-- Vòng 6: Lõi Năng Lượng Tâm Giữa -->
+      <svg class="astro-ring ring-core" viewBox="0 0 680 680">
+        <circle cx="340" cy="340" r="124" fill="none" stroke="rgba(10,200,185,0.45)" stroke-width="2.2"
+          stroke-dasharray="28 12 6 12" />
+        <circle cx="340" cy="340" r="102" fill="none" stroke="rgba(200,170,110,0.42)" stroke-width="1.2" />
+      </svg>
+
+      <!-- 2 Vòng Sóng Xung Kích Kép Khi Khóa / Cấm Tướng -->
+      <div class="lockin-shockwave" id="lockinShockwave"></div>
+      <div class="lockin-shockwave shockwave-secondary" id="lockinShockwave2"></div>
+    </div>
+
+    <!-- Tia Chém & Chớp Sáng Toàn Màn Hình Khi Khóa / Cấm -->
+    <div class="screen-flash-fx" id="screenFlashFx"></div>
+    <div class="screen-slash-fx" id="screenSlashFx"></div>
+
+    <!-- Canvas Hạt Năng Lượng + Sao Băng + Vụ Nổ Hạt Khi Khóa Tướng -->
+    <canvas id="hextechParticleCanvas" class="hextech-particles"></canvas>
+  </div>
+
+  <!-- ==================== THANH SYSTEM BAR TRÊN CÙNG ==================== -->
+  <header class="client-sysbar">
+    <div class="sysbar-left">
+      <button type="button" class="sys-btn" id="btnToggleMainMenu">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+          <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />
+        </svg>
+        <span>SẢNH TRẬN ĐẤU</span>
+      </button>
+
+      <div class="sys-match-code">
+        <span class="sys-dot" id="connDot"></span>
+        <span class="sys-label">ID:</span>
+        <strong id="roomCodeLabel">MAIN</strong>
+        <span class="sys-sync-tag" id="syncModeTag">LIVE</span>
+      </div>
+
+      <!-- Nút Bật/Tắt Bảng Nhân Vật -->
+      <button type="button" class="sys-btn sys-btn-highlight" id="btnTogglePoolView">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor">
+          <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+        </svg>
+        <span id="togglePoolBtnText">ẨN BẢNG TƯỚNG</span>
+      </button>
+
+      <!-- Điều khiển của Ban Tổ Chức -->
+      <div class="sys-btc-controls" id="btcToolbar">
+        <button type="button" class="sys-action-btn sys-btn-gold" id="btnStartMatch">BẮT ĐẦU</button>
+        <button type="button" class="sys-action-btn" id="btnPauseMatch">TẠM DỪNG</button>
+        <button type="button" class="sys-action-btn" id="btnSwapTeamsBtc">ĐỔI ĐỘI</button>
+        <button type="button" class="sys-action-btn" id="btnUndoStep">HOÀN TÁC</button>
+        <button type="button" class="sys-action-btn" id="btnEnterLineup">XẾP ĐỘI</button>
+        <button type="button" class="sys-action-btn sys-btn-gold" id="btnEnterStreamPhase">STREAM</button>
+        <button type="button" class="sys-action-btn" id="btnOpenSettings">CÀI ĐẶT</button>
+        <button type="button" class="sys-action-btn sys-btn-red" id="btnResetMatch">RESET</button>
+      </div>
+
+      <!-- Thanh trạng thái khi là Tuyển thủ -->
+      <div class="sys-player-bar hidden" id="playerToolbar">
+        <span class="sys-player-tag" id="playerSidePill">ĐỘI XANH</span>
+        <span class="sys-player-hint" id="playerLockedText"></span>
+        <button type="button" class="sys-action-btn sys-btn-gold" id="btnConfirmTeamLineup">CHỐT ĐỘI HÌNH</button>
+      </div>
+    </div>
+
+    <div class="sysbar-right">
+      <!-- Trình phát nhạc nền -->
+      <div class="bgm-controller">
+        <button type="button" class="sys-icon-btn" id="btnToggleBgm" title="Bật / Tắt Nhạc nền">
+          <svg id="iconBgmOff" viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+            <path
+              d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
+          </svg>
+          <svg id="iconBgmOn" class="hidden" viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
+            <path
+              d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+          </svg>
+        </button>
+        <input type="range" id="bgmVolumeSlider" class="bgm-slider" min="0" max="100" value="45" />
+      </div>
+
+      <div class="role-switcher" id="btcRoleSwitcher">
+        <button type="button" class="role-btn active" id="btnRoleSpec" data-role="SPEC">BTC / KHÁN GIẢ</button>
+        <button type="button" class="role-btn" id="btnRolePlayerA" data-role="PLAYER" data-team="A">VÀO ĐỘI
+          XANH</button>
+        <button type="button" class="role-btn" id="btnRolePlayerB" data-role="PLAYER" data-team="B">VÀO ĐỘI ĐỎ</button>
+      </div>
+
+      <div class="player-locked-badge hidden" id="playerLockedBadge">
+        <span>CỐ ĐỊNH PHE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==================== BÀN CẤM CHỌN (10 Ô CẤM TRÊN ĐẦU + VÒNG XOAY ĐA TẦNG) ==================== -->
+  <div class="lol-client-viewport" id="draftArenaWrapper">
+    <section class="lol-header-bar">
+      <!-- Cánh Trái: ĐỘI XANH + 5 Ô CẤM TRÊN ĐẦU -->
+      <div class="lol-header-team team-left" id="teamAHeaderCard">
+        <div class="header-top-flex">
+          <div class="header-identity-block">
+            <div class="header-team-top">
+              <span class="header-team-name" id="teamANameDisplay">ĐỘI XANH</span>
+              <span class="header-ready-tag hidden" id="teamAReadyBadge">ĐÃ CHỐT</span>
+            </div>
+            <span class="header-side-sub">ĐỘI ĐI TRƯỚC</span>
+          </div>
+
+          <div class="top-ban-strip">
+            <span class="top-ban-label">CẤM</span>
+            <div class="ban-slots" id="teamABanSlots"></div>
+          </div>
+        </div>
+
+        <div class="header-progress-track track-left">
+          <div class="header-progress-fill fill-blue" id="teamATurnBar">
+            <span class="progress-flare"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cụm Đồng Hồ Trung Tâm 3 Vòng Xoay Ngược Chiều + Vòng Loading Đếm Ngược -->
+      <div class="lol-header-center" id="centerClockPanel">
+        <div class="timer-dial-wrapper">
+          <svg class="timer-rotating-ring" viewBox="0 0 120 120">
+            <circle class="dial-ring-1" cx="60" cy="60" r="56" fill="none" stroke="rgba(200,170,110,0.45)"
+              stroke-width="1.5" stroke-dasharray="18 8 4 8" />
+            <circle class="dial-ring-2" cx="60" cy="60" r="48" fill="none" stroke="rgba(10,200,185,0.35)"
+              stroke-width="1.5" stroke-dasharray="32 14" />
+            <circle class="dial-progress-bg" cx="60" cy="60" r="42" fill="none" stroke="rgba(200,170,110,0.16)"
+              stroke-width="3" />
+            <circle class="dial-progress-bar" id="timerProgressCircle" cx="60" cy="60" r="42" fill="none"
+              stroke="#0ac8b9" stroke-width="3" stroke-linecap="round" stroke-dasharray="263.89"
+              stroke-dashoffset="0" transform="rotate(-90 60 60)" />
+            <circle class="dial-ring-3" cx="60" cy="60" r="35" fill="none" stroke="rgba(240,230,210,0.28)"
+              stroke-width="1" stroke-dasharray="6 10" />
+          </svg>
+          <div class="center-timer-number" id="timerDisplay">45</div>
+        </div>
+        <div class="center-phase-title" id="phaseTitlePill"></div>
+        <div class="center-sub-instruction" id="turnInstruction"></div>
+      </div>
+
+      <!-- Cánh Phải: 5 Ô CẤM ĐỘI ĐỎ TRÊN ĐẦU + ĐỘI ĐỎ -->
+      <div class="lol-header-team team-right" id="teamBHeaderCard">
+        <div class="header-top-flex row-reverse">
+          <div class="header-identity-block align-right">
+            <div class="header-team-top justify-end">
+              <span class="header-ready-tag hidden" id="teamBReadyBadge">ĐÃ CHỐT</span>
+              <span class="header-team-name" id="teamBNameDisplay">ĐỘI ĐỎ</span>
+            </div>
+            <span class="header-side-sub">ĐỘI ĐI SAU</span>
+          </div>
+
+          <div class="top-ban-strip">
+            <div class="ban-slots" id="teamBBanSlots"></div>
+            <span class="top-ban-label">CẤM</span>
+          </div>
+        </div>
+
+        <div class="header-progress-track track-right">
+          <div class="header-progress-fill fill-red" id="teamBTurnBar">
+            <span class="progress-flare"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Dải tiến trình 18 cụm lượt Cấm/Chọn -->
+    <div class="lol-sequence-strip" id="sequenceBar"></div>
+
+    <!-- THÂN CHÍNH 3 CỘT -->
+    <main class="lol-main-stage" id="lolMainStage">
+      <!-- CỘT TRÁI: 8 SLOT ĐỘI XANH (4 NỬA TRÊN + 4 NỬA DƯỚI) -->
+      <aside class="lol-team-column col-blue">
+        <div class="lol-half-divider">
+          <span>NỬA TRÊN</span>
+          <small id="teamASwapHint"></small>
+        </div>
+        <div class="lol-slots-group" id="teamAUpperPicks"></div>
+
+        <div class="lol-half-divider">
+          <span>NỬA DƯỚI</span>
+          <small></small>
+        </div>
+        <div class="lol-slots-group" id="teamALowerPicks"></div>
+      </aside>
+
+      <!-- CỘT GIỮA: KHI HIỆN BẢNG TƯỚNG vs KHI ẨN BẢNG TƯỚNG (FULL MÀN HÌNH) -->
+      <section class="lol-center-well" id="centerWellSection">
+        <!-- KHUNG TRÌNH CHIẾU TRUNG TÂM (HIỆN KHI ẨN BẢNG TƯỚNG Ở CHẾ ĐỘ NGƯỜI XEM FULL MÀN HÌNH) -->
+        <div class="spectator-center-showcase hidden" id="spectatorCenterShowcase">
+          <div class="showcase-ring-container" id="showcaseRingContainer">
+            <svg class="showcase-orbit-svg" viewBox="0 0 420 420">
+              <circle class="sc-ring-1" cx="210" cy="210" r="204" fill="none" stroke="rgba(200,170,110,0.55)"
+                stroke-width="1.8" stroke-dasharray="26 10 6 10" />
+              <circle class="sc-ring-2" cx="210" cy="210" r="192" fill="none" stroke="rgba(10,200,185,0.45)"
+                stroke-width="1.5" stroke-dasharray="50 20" />
+              <circle class="sc-ring-3" cx="210" cy="210" r="180" fill="none" stroke="rgba(240,230,210,0.3)"
+                stroke-width="1.2" stroke-dasharray="8 14" />
+            </svg>
+            <div class="showcase-avatar-disc">
+              <div class="showcase-char-art" id="showcaseCharArt"></div>
+              <div class="showcase-char-info hidden" id="showcaseCharInfo">
+                <div class="showcase-action-tag" id="showcaseActionTag"></div>
+                <div class="showcase-char-name" id="showcaseCharName"></div>
+                <div class="showcase-char-sub" id="showcaseCharSub"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== KHUNG 2 MÀN HÌNH STREAM ==================== -->
+        <div class="dual-stream-stage hidden" id="dualStreamStage">
+          <div class="dual-stream-topbar">
+            <div class="stream-lock-notice">
+              <span class="stream-lock-dot"></span>
+              <span>STREAM</span>
+            </div>
+            <div class="stream-topbar-actions">
+              <button type="button" class="sys-action-btn" id="btnToggleStreamSplit">
+                ĐỔI BỐ CỤC
+              </button>
+            </div>
+          </div>
+
+          <div class="dual-stream-grid split-vertical" id="dualStreamGrid">
+            <!-- MÀN HÌNH STREAM ĐỘI XANH (A) -->
+            <div class="stream-screen-card stream-card-blue" id="streamBoxA">
+              <div class="stream-card-header">
+                <div class="stream-header-left">
+                  <span class="stream-live-pill" id="streamStatusA">OFFLINE</span>
+                  <strong class="stream-team-label text-blue" id="streamTitleA">ĐỘI XANH</strong>
+                </div>
+                <div class="stream-header-controls">
+                  <button type="button" class="stream-ctrl-btn btn-discord-share" id="btnShareScreenA">
+                    STREAM
+                  </button>
+                  <button type="button" class="stream-ctrl-btn btn-discord-stop hidden" id="btnStopScreenA">
+                    DỪNG
+                  </button>
+                  <button type="button" class="stream-ctrl-btn" id="btnMuteStreamA">
+                    🔊
+                  </button>
+                  <button type="button" class="stream-ctrl-btn" id="btnFullscreenStreamA">
+                    ⛶
+                  </button>
+                </div>
+              </div>
+
+              <div class="stream-viewport" id="streamViewportA">
+                <video id="streamVideoA" class="stream-video hidden" autoplay playsinline></video>
+                <iframe id="streamIframeA" class="stream-iframe hidden" allow="autoplay; fullscreen" allowfullscreen></iframe>
+
+                <div class="stream-empty-overlay" id="streamPlaceholderA">
+                  <div class="stream-discord-icon">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+                      <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 8l6 4-6 4V8z"/>
+                    </svg>
+                  </div>
+                  <button type="button" class="btn-big-discord-share" id="btnQuickShareA">
+                    CHIA SẺ MÀN HÌNH
+                  </button>
+                  <div class="stream-embed-row" id="streamEmbedRowA">
+                    <input type="text" id="inputEmbedUrlA" class="stream-url-input" placeholder="Link stream..." />
+                    <button type="button" class="stream-ctrl-btn" id="btnSetEmbedA">OK</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- MÀN HÌNH STREAM ĐỘI ĐỎ (B) -->
+            <div class="stream-screen-card stream-card-red" id="streamBoxB">
+              <div class="stream-card-header">
+                <div class="stream-header-left">
+                  <span class="stream-live-pill" id="streamStatusB">OFFLINE</span>
+                  <strong class="stream-team-label text-red" id="streamTitleB">ĐỘI ĐỎ</strong>
+                </div>
+                <div class="stream-header-controls">
+                  <button type="button" class="stream-ctrl-btn btn-discord-share" id="btnShareScreenB">
+                    STREAM
+                  </button>
+                  <button type="button" class="stream-ctrl-btn btn-discord-stop hidden" id="btnStopScreenB">
+                    DỪNG
+                  </button>
+                  <button type="button" class="stream-ctrl-btn" id="btnMuteStreamB">
+                    🔊
+                  </button>
+                  <button type="button" class="stream-ctrl-btn" id="btnFullscreenStreamB">
+                    ⛶
+                  </button>
+                </div>
+              </div>
+
+              <div class="stream-viewport" id="streamViewportB">
+                <video id="streamVideoB" class="stream-video hidden" autoplay playsinline></video>
+                <iframe id="streamIframeB" class="stream-iframe hidden" allow="autoplay; fullscreen" allowfullscreen></iframe>
+
+                <div class="stream-empty-overlay" id="streamPlaceholderB">
+                  <div class="stream-discord-icon">
+                    <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
+                      <path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12zM10 8l6 4-6 4V8z"/>
+                    </svg>
+                  </div>
+                  <button type="button" class="btn-big-discord-share" id="btnQuickShareB">
+                    CHIA SẺ MÀN HÌNH
+                  </button>
+                  <div class="stream-embed-row" id="streamEmbedRowB">
+                    <input type="text" id="inputEmbedUrlB" class="stream-url-input" placeholder="Link stream..." />
+                    <button type="button" class="stream-ctrl-btn" id="btnSetEmbedB">OK</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BẢNG CHỌN NHÂN VẬT -->
+        <div class="champion-pool-container" id="championPoolContainer">
+          <div class="lol-lineup-notice hidden" id="lineupPhaseBanner">
+            <strong>SẮP XẾP ĐỘI HÌNH (90S)</strong>
+          </div>
+
+          <div class="lol-filter-bar">
+            <div class="lol-role-icons" id="elementFilters">
+              <button type="button" class="role-icon-btn active" data-element="ALL" title="Tất cả Nguyên tố">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path fill="currentColor" d="M12 2L9.2 9.2 2 12l7.2 2.8L12 22l2.8-7.2L22 12l-7.2-2.8z" />
+                </svg>
+              </button>
+              <button type="button" class="role-icon-btn el-pyro" data-element="Pyro" title="Hỏa (Pyro)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Fire.png" class="filter-el-img" alt="Pyro" />
+              </button>
+              <button type="button" class="role-icon-btn el-hydro" data-element="Hydro" title="Thủy (Hydro)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Water.png" class="filter-el-img" alt="Hydro" />
+              </button>
+              <button type="button" class="role-icon-btn el-anemo" data-element="Anemo" title="Phong (Anemo)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Wind.png" class="filter-el-img" alt="Anemo" />
+              </button>
+              <button type="button" class="role-icon-btn el-electro" data-element="Electro" title="Lôi (Electro)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Elect.png" class="filter-el-img" alt="Electro" />
+              </button>
+              <button type="button" class="role-icon-btn el-dendro" data-element="Dendro" title="Thảo (Dendro)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Grass.png" class="filter-el-img" alt="Dendro" />
+              </button>
+              <button type="button" class="role-icon-btn el-cryo" data-element="Cryo" title="Băng (Cryo)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Frost.png" class="filter-el-img" alt="Cryo" />
+              </button>
+              <button type="button" class="role-icon-btn el-geo" data-element="Geo" title="Nham (Geo)">
+                <img src="/sprites/element-icons/UI_Buff_Element_Roach.png" class="filter-el-img" alt="Geo" />
+              </button>
+            </div>
+
+            <div class="lol-search-controls">
+              <select id="weaponTypeSelect" class="lol-select">
+                <option value="ALL">Tất cả vũ khí</option>
+                <option value="Sword">Kiếm Đơn</option>
+                <option value="Claymore">Trọng Kiếm</option>
+                <option value="Polearm">Vũ Khí Cán Dài</option>
+                <option value="Bow">Cung</option>
+                <option value="Catalyst">Pháp Khí</option>
+              </select>
+
+              <select id="raritySelect" class="lol-select">
+                <option value="ALL">Mọi bậc sao</option>
+                <option value="5">5 Sao</option>
+                <option value="4">4 Sao</option>
+              </select>
+
+              <div class="lol-search-box">
+                <svg class="search-svg" viewBox="0 0 24 24" width="14" height="14">
+                  <path fill="currentColor"
+                    d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                </svg>
+                <input type="text" id="charSearchInput" placeholder="Tìm kiếm" autocomplete="off" />
+                <button type="button" class="btn-clear-search hidden" id="btnClearSearch">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="character-grid" id="characterGrid"></div>
+        </div>
+
+        <!-- NÚT KHÓA (LOCK IN) CHÍNH GIỮA DƯỚI CÙNG CHUẨN CLIENT LMHT -->
+        <div class="lol-bottom-dock" id="lockinBar">
+          <div class="dock-lockin-center">
+            <div class="hovered-mini-info">
+              <div class="hovered-avatar-placeholder hidden" id="hoveredAvatarBox"></div>
+              <span id="hoveredStatusLabel" class="hidden"></span>
+              <span id="hoveredCharName" class="hovered-mini-name"></span>
+            </div>
+            <div class="dock-lockin-buttons">
+              <button type="button" class="btn-skip-ban hidden" id="btnSkipBan">BỎ CẤM</button>
+              <button type="button" class="lol-lockin-btn" id="btnLockIn" disabled>
+                <span>KHÓA</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CỘT PHẢI: 8 SLOT ĐỘI ĐỎ (4 NỬA TRÊN + 4 NỬA DƯỚI) -->
+      <aside class="lol-team-column col-red">
+        <div class="lol-half-divider divider-right">
+          <small id="teamBSwapHint"></small>
+          <span>NỬA TRÊN</span>
+        </div>
+        <div class="lol-slots-group" id="teamBUpperPicks"></div>
+
+        <div class="lol-half-divider divider-right">
+          <small></small>
+          <span>NỬA DƯỚI</span>
+        </div>
+        <div class="lol-slots-group" id="teamBLowerPicks"></div>
+      </aside>
+    </main>
+
+    <div class="hidden">
+      <span id="ruleBanSec">45s</span>
+      <span id="rulePickSec">60s</span>
+      <span id="ruleLineupSec">90s</span>
+      <span id="actionLogTicker"></span>
+      <span id="apiSyncBadge"></span>
+    </div>
+  </div>
+
+  <!-- ==================== SẢNH CHÍNH (QUẢN LÝ NHIỀU TRẬN ĐẤU) ==================== -->
+  <section class="main-menu-overlay hidden" id="mainMenuOverlay">
+    <div class="main-menu-container">
+      <div class="menu-hero-header">
+        <div>
+          <h1 class="menu-title">DANH SÁCH PHÒNG ĐẤU</h1>
+          <p class="menu-desc">
+            Tạo phòng đấu mới với Mã ID riêng hoặc chọn trận đấu đang diễn ra.
+          </p>
+        </div>
+        <button type="button" class="btn-return-match" id="btnCloseMainMenu">
+          QUAY LẠI TRẬN ĐẤU (<span id="menuCurrentRoomText">MAIN</span>)
+        </button>
+      </div>
+
+      <div class="menu-grid">
+        <div class="hextech-box">
+          <h2 class="box-title">TẠO TRẬN ĐẤU MỚI</h2>
+          <p class="box-subtitle">Mỗi trận đấu có một Mã ID độc lập</p>
+
+          <div class="menu-form">
+            <div class="form-section">
+              <label class="form-label">Mã ID Trận Đấu:</label>
+              <div class="input-with-btn">
+                <input type="text" id="menuNewRoomId" class="hextech-input" placeholder="VD: GI-8899, TU-KET-1..."
+                  maxlength="24" />
+                <button type="button" class="sys-action-btn" id="btnGenerateRoomId">TẠO MÃ</button>
+              </div>
+            </div>
+
+            <div class="settings-grid-2">
+              <div class="form-section">
+                <label class="form-label text-blue">Tên Đội Xanh (Đi trước):</label>
+                <input type="text" id="menuNewTeamA" class="hextech-input input-blue" value="ĐỘI XANH" />
+              </div>
+              <div class="form-section">
+                <label class="form-label text-red">Tên Đội Đỏ (Đi sau):</label>
+                <input type="text" id="menuNewTeamB" class="hextech-input input-red" value="ĐỘI ĐỎ" />
+              </div>
+            </div>
+
+            <div class="settings-grid-3">
+              <div class="form-section">
+                <label class="form-label">Giây Cấm (Ban):</label>
+                <input type="number" id="menuNewBanSec" class="hextech-input" value="45" min="10" max="300" />
+              </div>
+              <div class="form-section">
+                <label class="form-label">Giây Chọn (Pick):</label>
+                <input type="number" id="menuNewPickSec" class="hextech-input" value="60" min="10" max="300" />
+              </div>
+              <div class="form-section">
+                <label class="form-label">Xếp Đội (4/4):</label>
+                <input type="number" id="menuNewLineupSec" class="hextech-input" value="90" min="15" max="600" />
+              </div>
+            </div>
+
+            <button type="button" class="btn-hextech-gold full-width" id="btnCreateNewMatch">
+              TẠO PHÒNG & LẤY LINK 2 ĐỘI
+            </button>
+          </div>
+        </div>
+
+        <div class="hextech-box">
+          <div class="box-Header-flex">
+            <div>
+              <h2 class="box-title">DANH SÁCH PHÒNG ĐẤU</h2>
+              <p class="box-subtitle">Nhập mã ID hoặc chọn phòng bên dưới</p>
+            </div>
+            <button type="button" class="sys-action-btn" id="btnRefreshRooms">LÀM MỚI</button>
+          </div>
+
+          <div class="join-by-id-bar">
+            <input type="text" id="menuJoinRoomInput" class="hextech-input"
+              placeholder="Nhập Mã ID trận đấu (VD: GI-1024)..." />
+            <button type="button" class="sys-action-btn sys-btn-gold" id="btnJoinRoomById">
+              VÀO PHÒNG
+            </button>
+          </div>
+
+          <div class="active-rooms-list" id="activeRoomsList">
+            <div class="empty-rooms-text">Đang tải danh sách trận đấu...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MODAL 1: CHỈNH CUNG MỆNH (C0-C6) & VŨ KHÍ (R1-R5) -->
+  <div class="modal-backdrop hidden" id="charMetaModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h3 id="metaModalTitle">CUNG MỆNH & VŨ KHÍ</h3>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseMetaModal">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="meta-char-summary" id="metaCharSummary"></div>
+
+        <div class="form-section">
+          <label class="form-label">Cung Mệnh (Constellation):</label>
+          <div class="constellation-pills" id="constellationPills">
+            <button type="button" class="const-pill active" data-const="C0">C0</button>
+            <button type="button" class="const-pill" data-const="C1">C1</button>
+            <button type="button" class="const-pill" data-const="C2">C2</button>
+            <button type="button" class="const-pill" data-const="C3">C3</button>
+            <button type="button" class="const-pill" data-const="C4">C4</button>
+            <button type="button" class="const-pill" data-const="C5">C5</button>
+            <button type="button" class="const-pill const-c6" data-const="C6">C6</button>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Tinh Luyện Vũ Khí (Refinement):</label>
+          <div class="refine-pills" id="refinePills">
+            <button type="button" class="refine-pill active" data-refine="R1">R1</button>
+            <button type="button" class="refine-pill" data-refine="R2">R2</button>
+            <button type="button" class="refine-pill" data-refine="R3">R3</button>
+            <button type="button" class="refine-pill" data-refine="R4">R4</button>
+            <button type="button" class="refine-pill refine-r5" data-refine="R5">R5</button>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Vũ Khí:</label>
+          <input type="text" id="weaponSearchInput" class="modal-input" placeholder="Tìm tên vũ khí..." />
+          <div class="weapon-picker-grid" id="weaponPickerGrid"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="sys-action-btn" id="btnClearWeaponMeta">XÓA VŨ KHÍ</button>
+        <div class="modal-footer-right">
+          <button type="button" class="sys-action-btn" id="btnCancelMetaModal">HỦY</button>
+          <button type="button" class="sys-action-btn sys-btn-gold" id="btnSaveCharMeta">LƯU THÔNG SỐ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: CÀI ĐẶT TRẬN ĐẤU & LINK PHÂN QUYỀN -->
+  <div class="modal-backdrop hidden" id="settingsModal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div>
+          <h3>CÀI ĐẶT PHÒNG & LINK MỜI (<span id="settingsRoomCodeTitle">MAIN</span>)</h3>
+          <p class="modal-subtitle">Người chơi vào qua link Đội Xanh hoặc Đội Đỏ sẽ bị khóa cố định đội</p>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseSettingsModal">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="settings-grid-2">
+          <div class="form-section">
+            <label class="form-label text-blue">Tên Đội Xanh (Đi trước):</label>
+            <input type="text" id="inputTeamAName" class="modal-input" value="ĐỘI XANH" />
+          </div>
+          <div class="form-section">
+            <label class="form-label text-red">Tên Đội Đỏ (Đi sau):</label>
+            <input type="text" id="inputTeamBName" class="modal-input" value="ĐỘI ĐỎ" />
+          </div>
+        </div>
+
+        <div class="settings-grid-3">
+          <div class="form-section">
+            <label class="form-label">Thời gian Cấm (s):</label>
+            <input type="number" id="inputBanDuration" class="modal-input" value="45" min="10" max="300" />
+          </div>
+          <div class="form-section">
+            <label class="form-label">Thời gian Chọn (s):</label>
+            <input type="number" id="inputPickDuration" class="modal-input" value="60" min="10" max="300" />
+          </div>
+          <div class="form-section">
+            <label class="form-label">Xếp Đội Hình (s):</label>
+            <input type="number" id="inputLineupDuration" class="modal-input" value="90" min="15" max="600" />
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Firebase Realtime Database URL (Đồng bộ Cloud Free 100%):</label>
+          <input type="text" id="inputFirebaseUrl" class="modal-input"
+            placeholder="https://ten-project-default-rtdb.asia-southeast1.firebasedatabase.app" />
+        </div>
+
+        <div class="share-links-box">
+          <div class="form-label">Đường dẫn theo vai trò (Gửi cho Tuyển thủ 2 đội):</div>
+          <div class="share-link-row">
+            <span>Ban Tổ Chức / Stream:</span>
+            <input type="text" id="shareLinkSpec" class="modal-input" readonly />
+            <button type="button" class="sys-action-btn" data-copy-target="shareLinkSpec">COPY</button>
+          </div>
+          <div class="share-link-row">
+            <span class="text-blue">Tuyển thủ Đội Xanh (A):</span>
+            <input type="text" id="shareLinkTeamA" class="modal-input" readonly />
+            <button type="button" class="sys-action-btn" data-copy-target="shareLinkTeamA">COPY</button>
+          </div>
+          <div class="share-link-row">
+            <span class="text-red">Tuyển thủ Đội Đỏ (B):</span>
+            <input type="text" id="shareLinkTeamB" class="modal-input" readonly />
+            <button type="button" class="sys-action-btn" data-copy-target="shareLinkTeamB">COPY</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="sys-action-btn" id="btnCancelSettings">ĐÓNG</button>
+        <button type="button" class="sys-action-btn sys-btn-gold" id="btnSaveSettings">LƯU CÀI ĐẶT</button>
+      </div>
+    </div>
+  </div>
+
+  <audio id="genshinBgmAudio" src="/sprites/musics/music-ban-pick.m4a" preload="auto" loop></audio>
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/js/firebase-config.js"></script>
+  <script src="/js/draft-engine.js"></script>
+  <script src="/js/genshin-data.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+
+</html>

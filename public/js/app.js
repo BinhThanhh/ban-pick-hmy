@@ -1,0 +1,2562 @@
+(function () {
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasExplicitRoomParam = urlParams.has('room');
+  let currentRoomId = (urlParams.get('room') || 'MAIN').toUpperCase().replace(/[^A-Z0-9_-]/g, '') || 'MAIN';
+
+  const urlRole = (urlParams.get('role') || 'SPEC').toUpperCase();
+  let clientRole = urlRole === 'PLAYER' ? 'PLAYER' : 'SPEC';
+  let clientTeam = (urlParams.get('team') || 'A').toUpperCase() === 'B' ? 'B' : 'A';
+
+  let firebaseDbUrl = (
+    urlParams.get('fb') ||
+    localStorage.getItem('hoyo_fb_url') ||
+    window.HOYO_FIREBASE_CONFIG?.databaseURL ||
+    ''
+  )
+    .trim()
+    .replace(/\/+$/, '');
+
+  if (urlParams.get('fb')) {
+    localStorage.setItem('hoyo_fb_url', firebaseDbUrl);
+  }
+
+  let searchQuery = '';
+  let selectedElement = 'ALL';
+  let selectedWeaponType = 'ALL';
+  let selectedRarity = 'ALL';
+
+  let swapSource = null;
+
+  let editingMetaTarget = null;
+  let modalConstellation = 'C0';
+  let modalRefine = 'R1';
+  let modalWeaponId = null;
+  let modalWeaponName = '';
+  let modalWeaponIcon = '';
+
+  let roomState = null;
+  let lastStepIndex = -1;
+  let lastHoveredChar = null;
+  let lastTimeLeft = -1;
+  let isSpectatorFullscreen = urlParams.get('view') === 'fullscreen' && clientRole === 'SPEC';
+
+  let rawRoomMemory = window.DRAFT_ENGINE
+    ? window.DRAFT_ENGINE.createInitialRoomState(currentRoomId)
+    : null;
+
+  let wsConnection = null;
+  let sseConnection = null;
+  let vercelPollTimer = null;
+  let localBroadcast = null;
+
+  // ==================== ICON NGUYÊN TỐ CHÍNH THỨC (/sprites/element-icons) ====================
+  const ELEMENT_SPRITE_URLS = {
+    Pyro: '/sprites/element-icons/UI_Buff_Element_Fire.png',
+    Hydro: '/sprites/element-icons/UI_Buff_Element_Water.png',
+    Anemo: '/sprites/element-icons/UI_Buff_Element_Wind.png',
+    Electro: '/sprites/element-icons/UI_Buff_Element_Elect.png',
+    Dendro: '/sprites/element-icons/UI_Buff_Element_Grass.png',
+    Cryo: '/sprites/element-icons/UI_Buff_Element_Frost.png',
+    Geo: '/sprites/element-icons/UI_Buff_Element_Roach.png'
+  };
+
+  const ELEMENT_SVGS = {
+    Pyro: `<img src="/sprites/element-icons/UI_Buff_Element_Fire.png" class="char-el-img" alt="Pyro" />`,
+    Hydro: `<img src="/sprites/element-icons/UI_Buff_Element_Water.png" class="char-el-img" alt="Hydro" />`,
+    Anemo: `<img src="/sprites/element-icons/UI_Buff_Element_Wind.png" class="char-el-img" alt="Anemo" />`,
+    Electro: `<img src="/sprites/element-icons/UI_Buff_Element_Elect.png" class="char-el-img" alt="Electro" />`,
+    Dendro: `<img src="/sprites/element-icons/UI_Buff_Element_Grass.png" class="char-el-img" alt="Dendro" />`,
+    Cryo: `<img src="/sprites/element-icons/UI_Buff_Element_Frost.png" class="char-el-img" alt="Cryo" />`,
+    Geo: `<img src="/sprites/element-icons/UI_Buff_Element_Roach.png" class="char-el-img" alt="Geo" />`
+  };
+
+  const ELEMENT_COLORS = {
+    Pyro: '#ff6b4a',
+    Hydro: '#38b6ff',
+    Anemo: '#4ce0b3',
+    Electro: '#c074ff',
+    Dendro: '#8be04e',
+    Cryo: '#7ce8ff',
+    Geo: '#f5b942'
+  };
+
+  // ==================== BỘ PHÁT NHẠC (/sprites/musics) & HIỆU ỨNG ÂM THANH (/sprites/sfx) ====================
+  const BGM_AUDIO_URL = '/sprites/musics/music-ban-pick.m4a';
+
+  // Các hiệu ứng âm thanh đặt tên bằng tiếng Anh trong /sprites/sfx/
+  const SFX_AUDIO_MAP = {
+    'banned-sound': '/sprites/sfx/banned-sound.mp3',
+    'pick-sound': '/sprites/sfx/pick-sound.mp3',
+    'click-button-sound': '/sprites/sfx/click-button-sound.mp3',
+    ban: '/sprites/sfx/banned-sound.mp3',
+    pick: '/sprites/sfx/pick-sound.mp3',
+    lock: '/sprites/sfx/pick-sound.mp3',
+    click: '/sprites/sfx/click-button-sound.mp3',
+    hover: '/sprites/sfx/click-button-sound.mp3'
+  };
+
+  const preloadedSfxPool = {};
+  Object.entries(SFX_AUDIO_MAP).forEach(([key, src]) => {
+    try {
+      if (!preloadedSfxPool[src]) {
+        const audio = new Audio(src);
+        audio.preload = 'auto';
+        preloadedSfxPool[src] = audio;
+      }
+    } catch (e) { }
+  });
+
+  let isBgmPlaying = false;
+  let bgmVolume = 0.45;
+
+  // Phát hiệu ứng âm thanh từ /sprites/sfx/ (banned-sound, pick-sound, click-button-sound)
+  function playLolSfx(type) {
+    try {
+      const sfxSrc = SFX_AUDIO_MAP[type];
+      if (!sfxSrc) return;
+      const baseAudio = preloadedSfxPool[sfxSrc] || new Audio(sfxSrc);
+      const clone = baseAudio.cloneNode();
+      const isClick = type === 'click-button-sound' || type === 'click' || type === 'hover';
+      clone.volume = Math.min(1, Math.max(0.18, (bgmVolume || 0.45) * (isClick ? 0.9 : 1.35)));
+      clone.play().catch(() => { });
+    } catch (e) { }
+  }
+
+  function updateBgmPlayback() {
+    const audioEl = document.getElementById('genshinBgmAudio');
+    const iconOff = document.getElementById('iconBgmOff');
+    const iconOn = document.getElementById('iconBgmOn');
+    const volSlider = document.getElementById('bgmVolumeSlider');
+
+    if (iconOff) iconOff.classList.toggle('hidden', isBgmPlaying);
+    if (iconOn) iconOn.classList.toggle('hidden', !isBgmPlaying);
+
+    if (!audioEl) return;
+
+    if (!isBgmPlaying) {
+      audioEl.pause();
+      return;
+    }
+
+    audioEl.muted = false;
+    if (bgmVolume <= 0.02) {
+      bgmVolume = 0.45;
+      if (volSlider) volSlider.value = '45';
+    }
+
+    if (!audioEl.getAttribute('src') || !audioEl.src.includes('music-ban-pick.m4a')) {
+      audioEl.src = BGM_AUDIO_URL;
+    }
+    audioEl.volume = bgmVolume;
+    audioEl.play().catch(() => { });
+  }
+
+  function autoPlayAndUnmuteBgm() {
+    isBgmPlaying = true;
+    const audioEl = document.getElementById('genshinBgmAudio');
+    if (audioEl) audioEl.muted = false;
+    updateBgmPlayback();
+  }
+
+  function autoPauseAndMuteBgm() {
+    isBgmPlaying = false;
+    const audioEl = document.getElementById('genshinBgmAudio');
+    if (audioEl) {
+      audioEl.muted = true;
+      audioEl.pause();
+    }
+    updateBgmPlayback();
+  }
+
+  function generateRandomMatchId() {
+    const num = Math.floor(1000 + Math.random() * 9000);
+    return `GI-${num}`;
+  }
+
+  function saveRecentRoomLocal(roomObj) {
+    if (!roomObj || !roomObj.roomId) return;
+    try {
+      const raw = localStorage.getItem('hoyo_recent_rooms');
+      const list = raw ? JSON.parse(raw) : [];
+      const filtered = list.filter((r) => r.roomId !== roomObj.roomId);
+      filtered.unshift({
+        roomId: roomObj.roomId,
+        teamAName: roomObj.teams?.A?.name || 'ĐỘI XANH',
+        teamBName: roomObj.teams?.B?.name || 'ĐỘI ĐỎ',
+        status: roomObj.status || 'WAITING',
+        stepIndex: roomObj.stepIndex || 0,
+        totalSteps: roomObj.totalSteps || 26,
+        updatedAt: Date.now()
+      });
+      localStorage.setItem('hoyo_recent_rooms', JSON.stringify(filtered.slice(0, 15)));
+    } catch (e) { }
+  }
+
+  function getRecentRoomsLocal() {
+    try {
+      const raw = localStorage.getItem('hoyo_recent_rooms');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function createFallbackAvatarDataUri(name, element) {
+    const color = ELEMENT_COLORS[element] || '#c8aa6e';
+    const initials = (name || '?')
+      .split(/\s+/)
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#091428"/>
+          <stop offset="100%" stop-color="${color}"/>
+        </linearGradient>
+      </defs>
+      <rect width="120" height="120" fill="url(#g)"/>
+      <text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" fill="#f0e6d2" font-family="sans-serif" font-weight="bold" font-size="38">${initials}</text>
+    </svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  }
+
+  window.handleImgFallback = function (imgEl) {
+    const fallbacks = (imgEl.getAttribute('data-fallbacks') || '').split('|').filter(Boolean);
+    const currentIdx = Number(imgEl.getAttribute('data-fb-idx') || '0');
+    if (currentIdx < fallbacks.length) {
+      imgEl.setAttribute('data-fb-idx', String(currentIdx + 1));
+      imgEl.src = fallbacks[currentIdx];
+    } else {
+      const name = imgEl.getAttribute('data-name') || '?';
+      const el = imgEl.getAttribute('data-el') || 'Pyro';
+      imgEl.onerror = null;
+      imgEl.src = createFallbackAvatarDataUri(name, el);
+    }
+  };
+
+  function buildSmartImgTag(urls, name, element, altText, extraClass = '') {
+    const list = Array.isArray(urls) && urls.length > 0 ? urls : [];
+    const primary = list[0] || createFallbackAvatarDataUri(name, element);
+    const rest = list.slice(1).join('|');
+    const safeName = (name || '').replace(/"/g, '&quot;');
+    const safeAlt = (altText || safeName).replace(/"/g, '&quot;');
+    const clsAttr = extraClass ? `class="${extraClass}"` : '';
+    return `<img ${clsAttr} src="${primary}" alt="${safeAlt}" loading="lazy" data-fallbacks="${rest}" data-fb-idx="0" data-name="${safeName}" data-el="${element || 'Pyro'}" onerror="window.handleImgFallback(this)" />`;
+  }
+
+  function showToast(msg) {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    container.appendChild(el);
+    setTimeout(() => {
+      el.remove();
+    }, 3200);
+  }
+
+  // ==================== ĐỒNG BỘ FIREBASE / SERVER ====================
+  function getFirebaseRoomEndpoint(roomId = currentRoomId) {
+    if (!firebaseDbUrl) return null;
+    return `${firebaseDbUrl}/rooms/${encodeURIComponent(roomId)}.json`;
+  }
+
+  async function pushStateToFirebase(rawObj, targetRoomId = currentRoomId) {
+    const endpoint = getFirebaseRoomEndpoint(targetRoomId);
+    if (!endpoint) return;
+    try {
+      await fetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rawObj)
+      });
+    } catch (e) { }
+  }
+
+  async function sendAction(action, payload = {}) {
+    const body = {
+      roomId: currentRoomId,
+      action,
+      role: clientRole,
+      team: clientTeam,
+      payload
+    };
+
+    if (firebaseDbUrl && window.DRAFT_ENGINE) {
+      try {
+        const endpoint = getFirebaseRoomEndpoint(currentRoomId);
+        const resGet = await fetch(endpoint);
+        const latestRaw = resGet.ok ? await resGet.json() : null;
+        rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(latestRaw || rawRoomMemory, currentRoomId);
+
+        const result = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
+        if (!result.ok) {
+          if (result.error) showToast(result.error);
+          return result;
+        }
+        await pushStateToFirebase(rawRoomMemory, currentRoomId);
+        const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+        applyRoomState(serialized);
+        localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
+        return { ok: true, state: serialized };
+      } catch (err) {
+        showToast('Lỗi đồng bộ Firebase Realtime Database.');
+        return { ok: false };
+      }
+    }
+
+    try {
+      const res = await fetch(`/api/action?room=${encodeURIComponent(currentRoomId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (!data.ok && data.error && data.error.includes('Hành động không hợp lệ') && window.DRAFT_ENGINE) {
+        rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(roomState || rawRoomMemory, currentRoomId);
+        const fallbackRes = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
+        if (fallbackRes.ok) {
+          const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+          applyRoomState(serialized);
+          localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
+          return { ok: true, state: serialized };
+        }
+      }
+      if (!data.ok && data.error) {
+        showToast(data.error);
+      }
+      if (data.state) {
+        applyRoomState(data.state);
+        localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: data.state });
+      }
+      return data;
+    } catch (err) {
+      if (window.DRAFT_ENGINE && rawRoomMemory) {
+        const result = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
+        if (!result.ok && result.error) {
+          showToast(result.error);
+          return result;
+        }
+        const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+        applyRoomState(serialized);
+        localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
+        return { ok: true, state: serialized };
+      }
+      showToast('Không thể kết nối máy chủ.');
+      return { ok: false };
+    }
+  }
+
+  function setupBroadcastChannel() {
+    try {
+      if (localBroadcast) localBroadcast.close();
+      if (typeof BroadcastChannel !== 'undefined') {
+        localBroadcast = new BroadcastChannel(`hoyo_banpick_${currentRoomId}`);
+        localBroadcast.onmessage = (ev) => {
+          if (ev.data && ev.data.type === 'STATE_UPDATE' && ev.data.state) {
+            applyRoomState(ev.data.state);
+          }
+        };
+      }
+    } catch (e) { }
+  }
+
+  function connectRealtime() {
+    document.getElementById('roomCodeLabel').textContent = currentRoomId;
+    const menuRoomText = document.getElementById('menuCurrentRoomText');
+    if (menuRoomText) menuRoomText.textContent = currentRoomId;
+
+    const connDot = document.getElementById('connDot');
+    const syncTag = document.getElementById('syncModeTag');
+
+    setupBroadcastChannel();
+
+    if (sseConnection) {
+      sseConnection.close();
+      sseConnection = null;
+    }
+    if (wsConnection) {
+      wsConnection.close();
+      wsConnection = null;
+    }
+    if (vercelPollTimer) {
+      clearInterval(vercelPollTimer);
+      vercelPollTimer = null;
+    }
+
+    if (firebaseDbUrl && window.DRAFT_ENGINE) {
+      syncTag.textContent = 'FIREBASE';
+      const endpoint = getFirebaseRoomEndpoint(currentRoomId);
+
+      fetch(endpoint)
+        .then((r) => r.json())
+        .then((data) => {
+          connDot.classList.remove('offline');
+          if (!data) {
+            rawRoomMemory = window.DRAFT_ENGINE.createInitialRoomState(currentRoomId);
+            pushStateToFirebase(rawRoomMemory, currentRoomId);
+          } else {
+            rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, currentRoomId);
+          }
+          applyRoomState(window.DRAFT_ENGINE.getSerializedState(rawRoomMemory));
+        })
+        .catch(() => {
+          connDot.classList.add('offline');
+        });
+
+      vercelPollTimer = setInterval(async () => {
+        try {
+          const r = await fetch(endpoint);
+          if (!r.ok) return;
+          const data = await r.json();
+          if (data) {
+            rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, currentRoomId);
+            if (clientRole === 'SPEC') {
+              const ticked = window.DRAFT_ENGINE.tickRoomTimer(rawRoomMemory);
+              if (ticked) {
+                await pushStateToFirebase(rawRoomMemory, currentRoomId);
+              }
+            }
+            applyRoomState(window.DRAFT_ENGINE.getSerializedState(rawRoomMemory));
+          }
+        } catch (e) { }
+      }, 1000);
+
+      return;
+    }
+
+    syncTag.textContent = 'LIVE';
+    let sseConnected = false;
+
+    try {
+      sseConnection = new EventSource(`/api/events?room=${encodeURIComponent(currentRoomId)}`);
+      sseConnection.onopen = () => {
+        sseConnected = true;
+        connDot.classList.remove('offline');
+      };
+      sseConnection.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'STATE_UPDATE' && msg.state) {
+            applyRoomState(msg.state);
+          }
+        } catch (e) { }
+      };
+      sseConnection.onerror = () => {
+        sseConnected = false;
+      };
+    } catch (e) { }
+
+    try {
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsConnection = new WebSocket(`${proto}//${window.location.host}/ws?room=${encodeURIComponent(currentRoomId)}`);
+      wsConnection.onopen = () => {
+        connDot.classList.remove('offline');
+      };
+      wsConnection.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'STATE_UPDATE' && msg.state) {
+            applyRoomState(msg.state);
+          }
+        } catch (e) { }
+      };
+    } catch (e) { }
+
+    vercelPollTimer = setInterval(async () => {
+      if (sseConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.ok && json.state) {
+            connDot.classList.remove('offline');
+            applyRoomState(json.state);
+          }
+        }
+      } catch (e) {
+        if (clientRole === 'SPEC' && window.DRAFT_ENGINE && rawRoomMemory) {
+          const changed = window.DRAFT_ENGINE.tickRoomTimer(rawRoomMemory);
+          if (changed) {
+            const s = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+            applyRoomState(s);
+            localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: s });
+          }
+        }
+      }
+    }, 1000);
+  }
+
+  // ==================== SẢNH TRẬN ĐẤU (MAIN MENU) ====================
+  function openMainMenu() {
+    if (clientRole !== 'SPEC') {
+      showToast('Người chơi đã cố định vào phòng đấu.');
+      return;
+    }
+    const overlay = document.getElementById('mainMenuOverlay');
+    overlay.classList.remove('hidden');
+    const newIdInput = document.getElementById('menuNewRoomId');
+    if (newIdInput && !newIdInput.value) {
+      newIdInput.value = generateRandomMatchId();
+    }
+    loadActiveRoomsList();
+  }
+
+  function closeMainMenu() {
+    document.getElementById('mainMenuOverlay').classList.add('hidden');
+  }
+
+  async function switchMatchRoom(newRoomId, initialSettings = null) {
+    const cleanId = String(newRoomId || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').trim();
+    if (!cleanId) {
+      showToast('Vui lòng nhập Mã ID trận đấu hợp lệ.');
+      return;
+    }
+
+    currentRoomId = cleanId;
+    swapSource = null;
+
+    const fbQuery = firebaseDbUrl ? `&fb=${encodeURIComponent(firebaseDbUrl)}` : '';
+    const newUrl = `${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}&role=${clientRole}${clientRole === 'PLAYER' ? `&team=${clientTeam}` : ''
+      }${fbQuery}`;
+    window.history.pushState({ roomId: currentRoomId }, '', newUrl);
+
+    if (window.DRAFT_ENGINE) {
+      rawRoomMemory = window.DRAFT_ENGINE.createInitialRoomState(currentRoomId);
+    }
+
+    connectRealtime();
+
+    if (initialSettings) {
+      await sendAction('UPDATE_SETTINGS', initialSettings);
+    } else if (!firebaseDbUrl) {
+      try {
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
+        const json = await res.json();
+        if (json.ok && json.state) {
+          applyRoomState(json.state);
+        }
+      } catch (e) { }
+    }
+
+    closeMainMenu();
+    showToast(`Đã vào phòng đấu [${currentRoomId}]`);
+  }
+
+  async function loadActiveRoomsList() {
+    const listContainer = document.getElementById('activeRoomsList');
+    if (!listContainer) return;
+
+    const mergedMap = new Map();
+    getRecentRoomsLocal().forEach((r) => mergedMap.set(r.roomId, r));
+
+    if (firebaseDbUrl) {
+      try {
+        const r = await fetch(`${firebaseDbUrl}/rooms.json`);
+        if (r.ok) {
+          const allFb = await r.json();
+          if (allFb && typeof allFb === 'object') {
+            Object.entries(allFb).forEach(([k, val]) => {
+              if (val && typeof val === 'object') {
+                mergedMap.set(k, {
+                  roomId: k,
+                  teamAName: val.teams?.A?.name || 'ĐỘI XANH',
+                  teamBName: val.teams?.B?.name || 'ĐỘI ĐỎ',
+                  status: val.status || 'WAITING',
+                  stepIndex: val.stepIndex || 0,
+                  totalSteps: 26
+                });
+              }
+            });
+          }
+        }
+      } catch (e) { }
+    } else {
+      try {
+        const r = await fetch('/api/rooms');
+        if (r.ok) {
+          const json = await r.json();
+          if (json.ok && Array.isArray(json.rooms)) {
+            json.rooms.forEach((rm) => mergedMap.set(rm.roomId, rm));
+          }
+        }
+      } catch (e) { }
+    }
+
+    const roomsArr = Array.from(mergedMap.values());
+    if (roomsArr.length === 0) {
+      listContainer.innerHTML = `<div class="empty-rooms-text">Chưa có phòng đấu nào.</div>`;
+      return;
+    }
+
+    const statusLabelMap = {
+      WAITING: 'Chờ bắt đầu',
+      DRAFTING: 'Đang Cấm/Chọn',
+      LINEUP: 'Đang xếp đội 90s',
+      COMPLETED: 'Hoàn tất'
+    };
+
+    listContainer.innerHTML = roomsArr
+      .map((rm) => {
+        const stText = statusLabelMap[rm.status] || rm.status;
+        return `
+          <div class="room-list-card">
+            <div>
+              <div class="room-card-id">ID: ${rm.roomId}</div>
+              <div class="room-card-teams">
+                <span class="text-blue">${rm.teamAName}</span>
+                <span style="color:var(--lol-grey); margin:0 6px;">vs</span>
+                <span class="text-red">${rm.teamBName}</span>
+              </div>
+              <div class="room-card-meta">
+                ${stText} ${rm.status === 'DRAFTING' ? `• Lượt ${(rm.stepIndex || 0) + 1}/${rm.totalSteps || 26}` : ''}
+              </div>
+            </div>
+            <div class="room-card-actions">
+              <button type="button" class="sys-action-btn sys-btn-gold btn-enter-room" data-room-id="${rm.roomId}">
+                VÀO PHÒNG
+              </button>
+              <button type="button" class="sys-action-btn btn-links-room" data-room-id="${rm.roomId}">
+                LẤY LINK
+              </button>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    listContainer.querySelectorAll('.btn-enter-room').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        switchMatchRoom(btn.getAttribute('data-room-id'));
+      });
+    });
+
+    listContainer.querySelectorAll('.btn-links-room').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        await switchMatchRoom(btn.getAttribute('data-room-id'));
+        openSettingsModal();
+      });
+    });
+  }
+
+  // ==================== HỆ THỐNG HIỆU ỨNG HẠT, VỤ NỔ TÂM, 3D PARALLAX & GSAP ====================
+  let burstParticlesPool = [];
+
+  function spawnParticleBurst(colorHex = '#0ac8b9', count = 42) {
+    const cx = window.innerWidth * 0.5;
+    const cy = window.innerHeight * 0.52;
+    for (let i = 0; i < count; i++) {
+      const angle = (Math.PI * 2 * i) / count + (Math.random() - 0.5) * 0.25;
+      const speed = Math.random() * 8.5 + 2.5;
+      burstParticlesPool.push({
+        x: cx,
+        y: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        r: Math.random() * 2.8 + 1.2,
+        alpha: 1,
+        decay: Math.random() * 0.018 + 0.014,
+        color: i % 3 === 0 ? '#f0e6d2' : colorHex
+      });
+    }
+  }
+
+  function initHextechParticles() {
+    const canvas = document.getElementById('hextechParticleCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let width = (canvas.width = window.innerWidth);
+    let height = (canvas.height = window.innerHeight);
+
+    window.addEventListener('resize', () => {
+      width = canvas.width = window.innerWidth;
+      height = canvas.height = window.innerHeight;
+    });
+
+    const particles = Array.from({ length: 64 }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      r: Math.random() * 2.1 + 0.5,
+      vy: -(Math.random() * 0.65 + 0.18),
+      vx: (Math.random() - 0.5) * 0.35,
+      alpha: Math.random() * 0.7 + 0.18,
+      pulseSpeed: Math.random() * 0.04 + 0.01,
+      pulsePhase: Math.random() * Math.PI * 2,
+      isCyan: Math.random() > 0.55
+    }));
+
+    function drawFrame() {
+      ctx.clearRect(0, 0, width, height);
+
+      // 1. Hạt năng lượng bay lên + vệt sáng sao băng
+      for (let i = 0; i < particles.length; i++) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.pulsePhase += p.pulseSpeed;
+
+        if (p.y < -12) {
+          p.y = height + 12;
+          p.x = Math.random() * width;
+        }
+        if (p.x < -12) p.x = width + 12;
+        if (p.x > width + 12) p.x = -12;
+
+        const curAlpha = Math.max(0.08, Math.min(0.95, p.alpha + Math.sin(p.pulsePhase) * 0.22));
+        const rgb = p.isCyan ? '10, 200, 185' : '200, 170, 110';
+
+        // Vẽ đuôi sao băng mảnh
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x - p.vx * 10, p.y - p.vy * 14);
+        ctx.strokeStyle = `rgba(${rgb}, ${curAlpha * 0.38})`;
+        ctx.lineWidth = p.r * 0.7;
+        ctx.stroke();
+
+        // Vẽ hạt nhân sáng
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${rgb}, ${curAlpha})`;
+        ctx.fill();
+      }
+
+      // 2. Hạt vụ nổ từ tâm khi Khóa / Cấm tướng
+      for (let j = burstParticlesPool.length - 1; j >= 0; j--) {
+        const bp = burstParticlesPool[j];
+        bp.x += bp.vx;
+        bp.y += bp.vy;
+        bp.vx *= 0.96;
+        bp.vy *= 0.96;
+        bp.alpha -= bp.decay;
+
+        if (bp.alpha <= 0) {
+          burstParticlesPool.splice(j, 1);
+          continue;
+        }
+
+        ctx.save();
+        ctx.globalAlpha = bp.alpha;
+        ctx.beginPath();
+        ctx.arc(bp.x, bp.y, bp.r, 0, Math.PI * 2);
+        ctx.fillStyle = bp.color;
+        ctx.shadowColor = bp.color;
+        ctx.shadowBlur = 10;
+        ctx.fill();
+        ctx.restore();
+      }
+
+      requestAnimationFrame(drawFrame);
+    }
+    requestAnimationFrame(drawFrame);
+
+    // Hiệu ứng 3D Parallax nghiêng nhẹ Tinh Bàn theo chuột
+    window.addEventListener('mousemove', (e) => {
+      if (!window.gsap) return;
+      const nx = (e.clientX / window.innerWidth - 0.5) * 2;
+      const ny = (e.clientY / window.innerHeight - 0.5) * 2;
+      const astrolabe = document.getElementById('hextechAstrolabe');
+      const showcaseRing = document.getElementById('showcaseRingContainer');
+      if (astrolabe) {
+        window.gsap.to(astrolabe, {
+          rotationY: nx * 9,
+          rotationX: -ny * 9,
+          duration: 0.65,
+          ease: 'power2.out',
+          overwrite: 'auto'
+        });
+      }
+      if (showcaseRing && isSpectatorFullscreen) {
+        window.gsap.to(showcaseRing, {
+          x: nx * 12,
+          y: ny * 10,
+          duration: 0.55,
+          ease: 'power2.out',
+          overwrite: 'auto'
+        });
+      }
+    });
+  }
+
+  function triggerGsapLockInEffect(isBan = false, accentColor = '#0ac8b9', lockedSlotSelector = null) {
+    const color = isBan ? '#e84057' : accentColor || '#0ac8b9';
+    spawnParticleBurst(color, 46);
+
+    if (!window.gsap) return;
+    const shockwave1 = document.getElementById('lockinShockwave');
+    const shockwave2 = document.getElementById('lockinShockwave2');
+    const astrolabe = document.getElementById('hextechAstrolabe');
+    const showcaseArt = document.getElementById('showcaseCharArt');
+    const showcaseRing = document.getElementById('showcaseRingContainer');
+    const flashFx = document.getElementById('screenFlashFx');
+    const slashFx = document.getElementById('screenSlashFx');
+
+    if (shockwave1) {
+      shockwave1.style.borderColor = color;
+      shockwave1.style.boxShadow = `0 0 50px ${color}, inset 0 0 35px ${color}`;
+      window.gsap.fromTo(
+        shockwave1,
+        { width: 50, height: 50, opacity: 1 },
+        { width: 1050, height: 1050, opacity: 0, duration: 0.85, ease: 'power3.out' }
+      );
+    }
+
+    if (shockwave2) {
+      shockwave2.style.borderColor = '#f0e6d2';
+      window.gsap.fromTo(
+        shockwave2,
+        { width: 40, height: 40, opacity: 0.9, rotation: 0 },
+        { width: 820, height: 820, opacity: 0, rotation: 90, duration: 1.05, delay: 0.08, ease: 'power2.out' }
+      );
+    }
+
+    if (flashFx) {
+      flashFx.style.background = `radial-gradient(circle at 50% 50%, ${color}55 0%, transparent 72%)`;
+      window.gsap.fromTo(
+        flashFx,
+        { opacity: 0.85 },
+        { opacity: 0, duration: 0.55, ease: 'power2.out' }
+      );
+    }
+
+    if (slashFx) {
+      const deg = isBan ? -24 : 16;
+      slashFx.style.background = `linear-gradient(90deg, transparent 0%, #ffffff 35%, ${color} 50%, #ffffff 65%, transparent 100%)`;
+      slashFx.style.boxShadow = `0 0 35px ${color}, 0 0 70px ${color}`;
+      window.gsap.fromTo(
+        slashFx,
+        { opacity: 1, scaleX: 0, scaleY: 1.8, rotation: deg },
+        { opacity: 0, scaleX: 1.15, scaleY: 0.2, rotation: deg, duration: 0.52, ease: 'expo.out' }
+      );
+    }
+
+    if (astrolabe) {
+      window.gsap.fromTo(
+        astrolabe,
+        { scale: 1.16, filter: 'brightness(2)' },
+        { scale: 1, filter: 'brightness(1)', duration: 0.72, ease: 'elastic.out(1, 0.55)' }
+      );
+    }
+
+    if (showcaseArt) {
+      window.gsap.fromTo(
+        showcaseArt,
+        { scale: 1.2, opacity: 0.35 },
+        { scale: 1, opacity: 1, duration: 0.6, ease: 'back.out(1.5)' }
+      );
+    }
+
+    if (showcaseRing && isSpectatorFullscreen) {
+      window.gsap.fromTo(
+        showcaseRing,
+        { scale: 0.9, boxShadow: `0 0 90px ${color}` },
+        { scale: 1, boxShadow: '0 0 60px rgba(10, 200, 185, 0.35)', duration: 0.65, ease: 'back.out(1.7)' }
+      );
+    }
+
+    if (lockedSlotSelector) {
+      requestAnimationFrame(() => {
+        const el = document.querySelector(lockedSlotSelector);
+        if (el) {
+          window.gsap.fromTo(
+            el,
+            { scale: 1.12, filter: 'brightness(2.2)' },
+            { scale: 1, filter: 'brightness(1)', duration: 0.55, ease: 'back.out(1.8)' }
+          );
+        }
+      });
+    }
+  }
+
+  function triggerGsapHoverEffect(accentColor = '#0ac8b9') {
+    spawnParticleBurst(accentColor, 14);
+    if (!window.gsap) return;
+    const showcaseArt = document.getElementById('showcaseCharArt');
+    const backdrop = document.getElementById('backdropSplash');
+    const astrolabe = document.getElementById('hextechAstrolabe');
+
+    if (showcaseArt && isSpectatorFullscreen) {
+      window.gsap.fromTo(
+        showcaseArt,
+        { scale: 1.09, opacity: 0.5 },
+        { scale: 1, opacity: 1, duration: 0.4, ease: 'power2.out' }
+      );
+    }
+    if (backdrop) {
+      window.gsap.fromTo(
+        backdrop,
+        { scale: 1.06 },
+        { scale: 1.01, duration: 0.45, ease: 'power2.out' }
+      );
+    }
+    if (astrolabe) {
+      window.gsap.fromTo(
+        astrolabe,
+        { scale: 1.04 },
+        { scale: 1, duration: 0.35, ease: 'power2.out' }
+      );
+    }
+  }
+
+  function triggerGsapTimerTick(timeLeft) {
+    if (!window.gsap) return;
+    const timerEl = document.getElementById('timerDisplay');
+    if (!timerEl) return;
+    const isUrgent = timeLeft <= 10;
+    window.gsap.fromTo(
+      timerEl,
+      { scale: isUrgent ? 1.28 : 1.1 },
+      { scale: 1, duration: 0.35, ease: 'back.out(2)' }
+    );
+  }
+
+  function setSpectatorFullscreen(enabled) {
+    if (clientRole !== 'SPEC') {
+      isSpectatorFullscreen = false;
+    } else {
+      isSpectatorFullscreen = Boolean(enabled);
+    }
+
+    document.body.classList.toggle('spectator-fullscreen', isSpectatorFullscreen);
+
+    const poolContainer = document.getElementById('championPoolContainer');
+    const showcaseContainer = document.getElementById('spectatorCenterShowcase');
+    const dualStreamStage = document.getElementById('dualStreamStage');
+    const lockinBar = document.getElementById('lockinBar');
+    const btnTogglePool = document.getElementById('btnTogglePoolView');
+    const togglePoolText = document.getElementById('togglePoolBtnText');
+
+    const isStreamPhase = roomState && roomState.status === 'COMPLETED';
+
+    if (isStreamPhase) {
+      if (poolContainer) poolContainer.classList.add('hidden');
+      if (showcaseContainer) showcaseContainer.classList.add('hidden');
+      if (lockinBar) lockinBar.classList.add('hidden');
+      if (dualStreamStage) dualStreamStage.classList.remove('hidden');
+    } else {
+      if (dualStreamStage) dualStreamStage.classList.add('hidden');
+      if (poolContainer) poolContainer.classList.toggle('hidden', isSpectatorFullscreen);
+      if (showcaseContainer) showcaseContainer.classList.toggle('hidden', !isSpectatorFullscreen);
+      if (lockinBar) lockinBar.classList.toggle('hidden', isSpectatorFullscreen);
+    }
+
+    if (btnTogglePool) {
+      btnTogglePool.classList.toggle('active-view', isSpectatorFullscreen);
+    }
+    if (togglePoolText) {
+      togglePoolText.textContent = isSpectatorFullscreen
+        ? 'HIỆN BẢNG TƯỚNG'
+        : 'ẨN BẢNG TƯỚNG';
+    }
+
+    if (window.gsap && !isStreamPhase) {
+      if (isSpectatorFullscreen && showcaseContainer) {
+        window.gsap.fromTo(
+          showcaseContainer,
+          { opacity: 0, scale: 0.88 },
+          { opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(1.4)' }
+        );
+      } else if (!isSpectatorFullscreen && poolContainer) {
+        window.gsap.fromTo(
+          poolContainer,
+          { opacity: 0, y: 16 },
+          { opacity: 1, y: 0, duration: 0.38, ease: 'power2.out' }
+        );
+      }
+    }
+  }
+
+  // ==================== HỆ THỐNG DISCORD SCREEN SHARE (WEBRTC P2P + EMBED) ====================
+  let myPeer = null;
+  let myPeerId = null;
+  const localScreenStreams = { A: null, B: null };
+  const remoteScreenStreams = { A: null, B: null };
+  const activePeerCalls = { A: null, B: null };
+  const connectedStreamerPeerIds = { A: null, B: null };
+  let isVerticalStreamSplit = true;
+
+  function initPeerEngine() {
+    if (typeof window.Peer === 'undefined') return;
+    try {
+      myPeer = new window.Peer();
+      myPeer.on('open', (id) => {
+        myPeerId = id;
+        ['A', 'B'].forEach((tKey) => {
+          if (localScreenStreams[tKey]) {
+            sendAction('UPDATE_STREAM_INFO', { team: tKey, peerId: myPeerId, active: true });
+          }
+        });
+        if (roomState && roomState.status === 'COMPLETED') {
+          renderDualStreamStage();
+        }
+      });
+
+      // Khi người xem (Viewer) kết nối tới máy đang Share màn hình (Streamer), Streamer gọi lại và truyền MediaStream
+      myPeer.on('connection', (conn) => {
+        conn.on('open', () => {
+          const requestedTeam = conn.metadata?.team;
+          if (requestedTeam && localScreenStreams[requestedTeam] && myPeer) {
+            myPeer.call(conn.peer, localScreenStreams[requestedTeam], {
+              metadata: { team: requestedTeam }
+            });
+          }
+        });
+      });
+
+      // Khi người xem nhận được cuộc gọi có chứa MediaStream từ máy đang Share
+      myPeer.on('call', (call) => {
+        const streamTeam = call.metadata?.team;
+        call.answer();
+        call.on('stream', (remoteStream) => {
+          if (streamTeam === 'A' || streamTeam === 'B') {
+            remoteScreenStreams[streamTeam] = remoteStream;
+            attachStreamToVideoElement(streamTeam, remoteStream, false);
+            updateStreamCardStateUI(streamTeam);
+          }
+        });
+        call.on('close', () => {
+          if (streamTeam === 'A' || streamTeam === 'B') {
+            remoteScreenStreams[streamTeam] = null;
+            updateStreamCardStateUI(streamTeam);
+          }
+        });
+      });
+    } catch (e) { }
+  }
+
+  function attachStreamToVideoElement(teamKey, mediaStream, isLocalPreview = false) {
+    const videoEl = document.getElementById(teamKey === 'A' ? 'streamVideoA' : 'streamVideoB');
+    if (!videoEl) return;
+    if (videoEl.srcObject !== mediaStream) {
+      videoEl.srcObject = mediaStream;
+    }
+    if (isLocalPreview) {
+      videoEl.muted = true;
+    }
+    videoEl.classList.remove('hidden');
+    videoEl.play().catch(() => { });
+  }
+
+  async function startDiscordScreenShare(teamKey) {
+    if (clientRole !== 'SPEC' && clientTeam !== teamKey) {
+      showToast('Bạn chỉ có thể Share màn hình cho đội của mình!');
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      showToast('Trình duyệt của bạn không hỗ trợ Share màn hình trực tiếp.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          cursor: 'always',
+          frameRate: { ideal: 60, max: 60 }
+        },
+        audio: true
+      });
+
+      if (localScreenStreams[teamKey]) {
+        localScreenStreams[teamKey].getTracks().forEach((t) => t.stop());
+      }
+
+      localScreenStreams[teamKey] = stream;
+      attachStreamToVideoElement(teamKey, stream, true);
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.addEventListener('ended', () => {
+          stopDiscordScreenShare(teamKey);
+        });
+      }
+
+      if (!myPeer && typeof window.Peer !== 'undefined') {
+        initPeerEngine();
+      }
+
+      await sendAction('UPDATE_STREAM_INFO', {
+        team: teamKey,
+        peerId: myPeerId || 'LOCAL_STREAM',
+        active: true,
+        embedUrl: ''
+      });
+
+      renderDualStreamStage();
+      showToast(`Đang phát trực tiếp màn hình ${roomState?.teams?.[teamKey]?.name || `Đội ${teamKey}`}!`);
+    } catch (err) {
+      if (err && err.name !== 'NotAllowedError') {
+        showToast('Không thể bắt đầu Share màn hình.');
+      }
+    }
+  }
+
+  async function stopDiscordScreenShare(teamKey) {
+    if (localScreenStreams[teamKey]) {
+      localScreenStreams[teamKey].getTracks().forEach((t) => t.stop());
+      localScreenStreams[teamKey] = null;
+    }
+    remoteScreenStreams[teamKey] = null;
+    connectedStreamerPeerIds[teamKey] = null;
+
+    const videoEl = document.getElementById(teamKey === 'A' ? 'streamVideoA' : 'streamVideoB');
+    if (videoEl) {
+      videoEl.srcObject = null;
+      videoEl.classList.add('hidden');
+    }
+
+    await sendAction('UPDATE_STREAM_INFO', {
+      team: teamKey,
+      peerId: null,
+      active: false
+    });
+
+    renderDualStreamStage();
+    showToast(`Đã dừng Share màn hình ${roomState?.teams?.[teamKey]?.name || `Đội ${teamKey}`}.`);
+  }
+
+  function normalizeStreamEmbedUrl(rawUrl) {
+    const trimmed = String(rawUrl || '').trim();
+    if (!trimmed) return '';
+    try {
+      const u = new URL(trimmed);
+      if (u.hostname.includes('youtube.com') && u.searchParams.get('v')) {
+        return `https://www.youtube.com/embed/${u.searchParams.get('v')}?autoplay=1&mute=0`;
+      }
+      if (u.hostname === 'youtu.be' && u.pathname.length > 1) {
+        return `https://www.youtube.com/embed/${u.pathname.slice(1)}?autoplay=1&mute=0`;
+      }
+      if (u.hostname.includes('twitch.tv')) {
+        const channel = u.pathname.split('/').filter(Boolean)[0];
+        if (channel && channel !== 'videos') {
+          return `https://player.twitch.tv/?channel=${encodeURIComponent(channel)}&parent=${encodeURIComponent(window.location.hostname || 'localhost')}`;
+        }
+      }
+      return trimmed;
+    } catch (e) {
+      return trimmed;
+    }
+  }
+
+  function connectToRemoteTeamStreamIfNeeded(teamKey) {
+    if (!roomState || !roomState.streams || !roomState.streams[teamKey]) return;
+    const streamInfo = roomState.streams[teamKey];
+
+    if (!streamInfo.active || !streamInfo.peerId || streamInfo.peerId === 'LOCAL_STREAM') {
+      connectedStreamerPeerIds[teamKey] = null;
+      return;
+    }
+
+    // Nếu chính máy này đang phát stream cho teamKey thì không cần tự gọi chính mình
+    if (localScreenStreams[teamKey] || (myPeerId && streamInfo.peerId === myPeerId)) {
+      return;
+    }
+
+    if (!myPeer || !myPeerId) return;
+
+    if (connectedStreamerPeerIds[teamKey] === streamInfo.peerId && remoteScreenStreams[teamKey]) {
+      return;
+    }
+
+    connectedStreamerPeerIds[teamKey] = streamInfo.peerId;
+    try {
+      const conn = myPeer.connect(streamInfo.peerId, {
+        metadata: { team: teamKey }
+      });
+      conn.on('error', () => {
+        connectedStreamerPeerIds[teamKey] = null;
+      });
+    } catch (e) {
+      connectedStreamerPeerIds[teamKey] = null;
+    }
+  }
+
+  function updateStreamCardStateUI(teamKey) {
+    if (!roomState) return;
+    const streamInfo = roomState.streams?.[teamKey] || { peerId: null, active: false, embedUrl: '' };
+    const isLocalStreaming = Boolean(localScreenStreams[teamKey]);
+    const isRemoteStreaming = Boolean(remoteScreenStreams[teamKey] && streamInfo.active);
+    const hasEmbed = Boolean(streamInfo.embedUrl);
+    const isLive = isLocalStreaming || isRemoteStreaming || hasEmbed || Boolean(streamInfo.active);
+
+    const canControlThisTeam =
+      clientRole === 'SPEC' || (clientRole === 'PLAYER' && clientTeam === teamKey);
+
+    const nameEl = document.getElementById(teamKey === 'A' ? 'streamTitleA' : 'streamTitleB');
+    const liveBadge = document.getElementById(teamKey === 'A' ? 'streamStatusA' : 'streamStatusB');
+    const placeholder = document.getElementById(teamKey === 'A' ? 'streamPlaceholderA' : 'streamPlaceholderB');
+    const videoEl = document.getElementById(teamKey === 'A' ? 'streamVideoA' : 'streamVideoB');
+    const iframeEl = document.getElementById(teamKey === 'A' ? 'streamIframeA' : 'streamIframeB');
+    const btnShare = document.getElementById(teamKey === 'A' ? 'btnShareScreenA' : 'btnShareScreenB');
+    const btnQuickShare = document.getElementById(teamKey === 'A' ? 'btnQuickShareA' : 'btnQuickShareB');
+    const btnStop = document.getElementById(teamKey === 'A' ? 'btnStopScreenA' : 'btnStopScreenB');
+    const embedRow = document.getElementById(teamKey === 'A' ? 'streamEmbedRowA' : 'streamEmbedRowB');
+
+    if (nameEl) nameEl.textContent = roomState.teams[teamKey]?.name || `ĐỘI ${teamKey}`;
+
+    if (liveBadge) {
+      liveBadge.textContent = isLive ? 'LIVE' : 'OFFLINE';
+      liveBadge.classList.toggle('is-live', isLive);
+    }
+
+    if (btnShare) btnShare.classList.toggle('hidden', !canControlThisTeam || isLocalStreaming);
+    if (btnQuickShare) btnQuickShare.classList.toggle('hidden', !canControlThisTeam || isLocalStreaming);
+    if (btnStop) btnStop.classList.toggle('hidden', !canControlThisTeam || (!isLocalStreaming && !hasEmbed && !streamInfo.active));
+    if (embedRow) embedRow.classList.toggle('hidden', !canControlThisTeam);
+
+    if (isLocalStreaming && localScreenStreams[teamKey]) {
+      if (placeholder) placeholder.classList.add('hidden');
+      if (iframeEl) {
+        iframeEl.classList.add('hidden');
+        iframeEl.src = 'about:blank';
+      }
+      attachStreamToVideoElement(teamKey, localScreenStreams[teamKey], true);
+      return;
+    }
+
+    if (isRemoteStreaming && remoteScreenStreams[teamKey]) {
+      if (placeholder) placeholder.classList.add('hidden');
+      if (iframeEl) {
+        iframeEl.classList.add('hidden');
+        iframeEl.src = 'about:blank';
+      }
+      attachStreamToVideoElement(teamKey, remoteScreenStreams[teamKey], false);
+      return;
+    }
+
+    if (hasEmbed) {
+      if (placeholder) placeholder.classList.add('hidden');
+      if (videoEl) {
+        videoEl.srcObject = null;
+        videoEl.classList.add('hidden');
+      }
+      if (iframeEl) {
+        iframeEl.classList.remove('hidden');
+        if (iframeEl.src !== streamInfo.embedUrl) {
+          iframeEl.src = streamInfo.embedUrl;
+        }
+      }
+      return;
+    }
+
+    if (videoEl) {
+      videoEl.srcObject = null;
+      videoEl.classList.add('hidden');
+    }
+    if (iframeEl) {
+      iframeEl.classList.add('hidden');
+      if (iframeEl.src !== 'about:blank') iframeEl.src = 'about:blank';
+    }
+    if (placeholder) {
+      placeholder.classList.remove('hidden');
+    }
+  }
+
+  function renderDualStreamStage() {
+    if (!roomState) return;
+    const isStreamPhase = roomState.status === 'COMPLETED';
+    const dualStreamStage = document.getElementById('dualStreamStage');
+    const poolContainer = document.getElementById('championPoolContainer');
+    const showcaseContainer = document.getElementById('spectatorCenterShowcase');
+    const lockinBar = document.getElementById('lockinBar');
+
+    if (isStreamPhase) {
+      if (dualStreamStage) dualStreamStage.classList.remove('hidden');
+      if (poolContainer) poolContainer.classList.add('hidden');
+      if (showcaseContainer) showcaseContainer.classList.add('hidden');
+      if (lockinBar) lockinBar.classList.add('hidden');
+
+      connectToRemoteTeamStreamIfNeeded('A');
+      connectToRemoteTeamStreamIfNeeded('B');
+      updateStreamCardStateUI('A');
+      updateStreamCardStateUI('B');
+    } else {
+      if (dualStreamStage) dualStreamStage.classList.add('hidden');
+      if (poolContainer) poolContainer.classList.toggle('hidden', isSpectatorFullscreen);
+      if (showcaseContainer) showcaseContainer.classList.toggle('hidden', !isSpectatorFullscreen);
+      if (lockinBar) lockinBar.classList.toggle('hidden', isSpectatorFullscreen);
+    }
+  }
+
+  // ==================== RENDER GIAO DIỆN ====================
+  function renderRoleUI() {
+    const btnMainMenu = document.getElementById('btnToggleMainMenu');
+    const btnTogglePool = document.getElementById('btnTogglePoolView');
+    const btcRoleSwitcher = document.getElementById('btcRoleSwitcher');
+    const playerLockedBadge = document.getElementById('playerLockedBadge');
+    const btcToolbar = document.getElementById('btcToolbar');
+    const playerToolbar = document.getElementById('playerToolbar');
+    const playerSidePill = document.getElementById('playerSidePill');
+
+    if (clientRole === 'SPEC') {
+      btnMainMenu.classList.remove('hidden');
+      if (btnTogglePool) btnTogglePool.classList.remove('hidden');
+      btcRoleSwitcher.classList.remove('hidden');
+      playerLockedBadge.classList.add('hidden');
+      btcToolbar.classList.remove('hidden');
+      playerToolbar.classList.add('hidden');
+      setSpectatorFullscreen(isSpectatorFullscreen);
+    } else {
+      btnMainMenu.classList.add('hidden');
+      if (btnTogglePool) btnTogglePool.classList.add('hidden');
+      btcRoleSwitcher.classList.add('hidden');
+      playerLockedBadge.classList.remove('hidden');
+      btcToolbar.classList.add('hidden');
+      playerToolbar.classList.remove('hidden');
+      setSpectatorFullscreen(false);
+
+      const teamName = roomState?.teams?.[clientTeam]?.name || `ĐỘI ${clientTeam}`;
+      playerSidePill.textContent = teamName;
+      playerSidePill.classList.toggle('side-b', clientTeam === 'B');
+    }
+
+    const teamASwapHint = document.getElementById('teamASwapHint');
+    const teamBSwapHint = document.getElementById('teamBSwapHint');
+    if (teamASwapHint) teamASwapHint.textContent = '';
+    if (teamBSwapHint) teamBSwapHint.textContent = '';
+
+    if (roomState) {
+      renderAll();
+    }
+  }
+
+  function applyRoomState(newState) {
+    let lockedEffectArgs = null;
+    let hoverEffectColor = null;
+    let shouldPulseTimer = false;
+    const prevStatus = roomState ? roomState.status : null;
+
+    if (roomState) {
+      // Tự động phát & unmute nhạc khi Bắt đầu trận đấu (WAITING -> DRAFTING)
+      if (prevStatus === 'WAITING' && newState.status === 'DRAFTING') {
+        autoPlayAndUnmuteBgm();
+      }
+      // Tự động pause & mute nhạc khi hết 90s sắp xếp đội hình (chuyển sang COMPLETED)
+      if (prevStatus && prevStatus !== 'COMPLETED' && newState.status === 'COMPLETED') {
+        swapSource = null;
+        autoPauseAndMuteBgm();
+      }
+
+      if (newState.stepIndex !== lastStepIndex && (newState.status === 'DRAFTING' || newState.status === 'LINEUP')) {
+        const prevStep = roomState.currentStep;
+        const isBan = prevStep?.type === 'BAN';
+        playLolSfx(isBan ? 'banned-sound' : 'pick-sound');
+        let accentColor = isBan ? '#e84057' : '#0ac8b9';
+        let slotSelector = null;
+
+        if (prevStep) {
+          const slotData = isBan
+            ? newState.teams?.[prevStep.team]?.bans?.[prevStep.slotIndex]
+            : newState.teams?.[prevStep.team]?.picks?.[prevStep.slotIndex];
+          if (slotData?.charId) {
+            const cObj = window.MIHOYO_DATA.getCharacterById(slotData.charId);
+            if (cObj && ELEMENT_COLORS[cObj.element]) {
+              accentColor = ELEMENT_COLORS[cObj.element];
+            }
+          }
+          slotSelector = isBan
+            ? `#team${prevStep.team}BanSlots .ban-slot:nth-child(${prevStep.slotIndex + 1})`
+            : `.pick-slot-card[data-team="${prevStep.team}"][data-slot="${prevStep.slotIndex}"]`;
+        }
+        const latestLogText = newState.actionLog?.[0]?.text || '';
+        if (latestLogText.includes('[BTC/Hết giờ]')) {
+          showToast(latestLogText);
+        }
+        lockedEffectArgs = { isBan, accentColor, slotSelector };
+      } else if (newState.hoveredCharId && newState.hoveredCharId !== lastHoveredChar) {
+        playLolSfx('click-button-sound');
+        const hObj = window.MIHOYO_DATA.getCharacterById(newState.hoveredCharId);
+        hoverEffectColor = (hObj && ELEMENT_COLORS[hObj.element]) || '#0ac8b9';
+      } else if (
+        newState.timeLeft !== lastTimeLeft &&
+        (newState.status === 'DRAFTING' || newState.status === 'LINEUP')
+      ) {
+        shouldPulseTimer = true;
+      }
+    }
+
+    lastStepIndex = newState.stepIndex;
+    lastHoveredChar = newState.hoveredCharId;
+    lastTimeLeft = newState.timeLeft;
+    roomState = newState;
+
+    saveRecentRoomLocal(newState);
+    renderAll();
+
+    if (lockedEffectArgs) {
+      triggerGsapLockInEffect(
+        lockedEffectArgs.isBan,
+        lockedEffectArgs.accentColor,
+        lockedEffectArgs.slotSelector
+      );
+    } else if (hoverEffectColor) {
+      triggerGsapHoverEffect(hoverEffectColor);
+    } else if (shouldPulseTimer) {
+      triggerGsapTimerTick(newState.timeLeft);
+    }
+  }
+
+  let currentShowcaseCharId = null;
+  let currentBackdropCharId = null;
+
+  function updateBackdropSplash() {
+    const splashEl = document.getElementById('backdropSplash');
+    const ambientGlow = document.getElementById('elementalAmbientGlow');
+    const showcaseArt = document.getElementById('showcaseCharArt');
+    const showcaseInfo = document.getElementById('showcaseCharInfo');
+    const showcaseTag = document.getElementById('showcaseActionTag');
+    const showcaseName = document.getElementById('showcaseCharName');
+    const showcaseSub = document.getElementById('showcaseCharSub');
+    if (!splashEl || !roomState) return;
+
+    const targetCharId = roomState.status === 'DRAFTING' ? roomState.hoveredCharId : null;
+
+    if (targetCharId && roomState.currentStep) {
+      const charObj = window.MIHOYO_DATA.getCharacterById(targetCharId);
+      if (charObj) {
+        const tName = roomState.teams[roomState.currentStep.team]?.name || '';
+        const actionLabel = `${tName} • ${roomState.currentStep.type === 'BAN' ? 'CẤM' : 'CHỌN'}`;
+        const elColor = ELEMENT_COLORS[charObj.element] || '#0ac8b9';
+
+        // Nền đằng sau (#backdropSplash) hiển thị ảnh Splash Art nhân vật (UI_Gacha_AvatarImg_...)
+        if (currentBackdropCharId !== targetCharId) {
+          currentBackdropCharId = targetCharId;
+          splashEl.style.backgroundImage = '';
+          splashEl.innerHTML = buildSmartImgTag(
+            charObj.splashUrls || charObj.iconUrls,
+            charObj.name,
+            charObj.element,
+            charObj.nameVi,
+            'backdrop-splash-img'
+          );
+        }
+
+        if (ambientGlow) {
+          ambientGlow.style.background = `radial-gradient(circle, ${elColor}38 0%, rgba(200, 170, 110, 0.1) 48%, transparent 72%)`;
+        }
+
+        // Vòng tròn trung tâm (#showcaseCharArt) hiển thị Avatar nhân vật (UI_AvatarIcon_...)
+        if (showcaseArt && currentShowcaseCharId !== targetCharId) {
+          currentShowcaseCharId = targetCharId;
+          showcaseArt.style.backgroundImage = '';
+          showcaseArt.innerHTML = buildSmartImgTag(
+            charObj.iconUrls,
+            charObj.name,
+            charObj.element,
+            charObj.nameVi
+          );
+        }
+        if (showcaseInfo) showcaseInfo.classList.remove('hidden');
+        if (showcaseTag) showcaseTag.textContent = actionLabel;
+        if (showcaseName) showcaseName.textContent = charObj.nameVi.toUpperCase();
+        if (showcaseSub) {
+          const elSprite = ELEMENT_SPRITE_URLS[charObj.element]
+            ? `<img src="${ELEMENT_SPRITE_URLS[charObj.element]}" class="showcase-el-img" alt="${charObj.element}" />`
+            : '';
+          showcaseSub.innerHTML = `${elSprite}<span>${charObj.element.toUpperCase()} • ${charObj.rarity} SAO</span>`;
+        }
+        return;
+      }
+    }
+
+    // Sau khi Khóa / Cấm hoặc chưa chọn tướng: Xóa sạch ảnh nền và ảnh trung tâm về trạng thái ban đầu
+    currentBackdropCharId = null;
+    currentShowcaseCharId = null;
+    splashEl.style.backgroundImage = '';
+    splashEl.innerHTML = '';
+    if (ambientGlow) {
+      ambientGlow.style.background =
+        'radial-gradient(circle, rgba(10, 200, 185, 0.16) 0%, rgba(200, 170, 110, 0.08) 45%, transparent 72%)';
+    }
+    if (showcaseArt) {
+      showcaseArt.style.backgroundImage = '';
+      showcaseArt.innerHTML = '';
+    }
+    if (showcaseInfo) showcaseInfo.classList.add('hidden');
+    if (showcaseTag) showcaseTag.textContent = '';
+    if (showcaseName) showcaseName.textContent = '';
+    if (showcaseSub) showcaseSub.textContent = '';
+  }
+
+  function renderAll() {
+    if (!roomState) return;
+    updateBackdropSplash();
+    renderHeaderAndClock();
+    renderSequenceBar();
+    renderBanSlots('A', document.getElementById('teamABanSlots'));
+    renderBanSlots('B', document.getElementById('teamBBanSlots'));
+    renderTeamPicks('A');
+    renderTeamPicks('B');
+    renderLockinBar();
+    renderCharacterGrid();
+    renderDualStreamStage();
+  }
+
+  function renderHeaderAndClock() {
+    const { status, isPaused, currentStep, timeLeft, teams, banDuration, pickDuration, lineupDuration } = roomState;
+
+    document.getElementById('teamANameDisplay').textContent = teams.A.name;
+    document.getElementById('teamBNameDisplay').textContent = teams.B.name;
+    document.getElementById('teamAReadyBadge').classList.toggle('hidden', !teams.A.readyLineup);
+    document.getElementById('teamBReadyBadge').classList.toggle('hidden', !teams.B.readyLineup);
+
+    if (clientRole === 'PLAYER') {
+      const tName = teams[clientTeam]?.name || `ĐỘI ${clientTeam}`;
+      document.getElementById('playerSidePill').textContent = tName;
+    }
+
+    const isTurnA = status === 'DRAFTING' && currentStep?.team === 'A';
+    const isTurnB = status === 'DRAFTING' && currentStep?.team === 'B';
+    const isUrgent = timeLeft <= 10 && (status === 'DRAFTING' || status === 'LINEUP');
+
+    const headerA = document.getElementById('teamAHeaderCard');
+    const headerB = document.getElementById('teamBHeaderCard');
+    if (headerA) headerA.classList.toggle('team-turn-active', isTurnA || status === 'LINEUP');
+    if (headerB) headerB.classList.toggle('team-turn-active', isTurnB || status === 'LINEUP');
+
+    const turnBarA = document.getElementById('teamATurnBar');
+    const turnBarB = document.getElementById('teamBTurnBar');
+    const timerCircle = document.getElementById('timerProgressCircle');
+    const circumference = 263.89;
+    let ringPct = 0;
+
+    if (status === 'DRAFTING' && currentStep) {
+      const maxDur = currentStep.type === 'BAN' ? banDuration : pickDuration;
+      const pct = Math.max(0, Math.min(100, (timeLeft / maxDur) * 100));
+      ringPct = pct;
+      turnBarA.style.width = isTurnA ? `${pct}%` : '0%';
+      turnBarB.style.width = isTurnB ? `${pct}%` : '0%';
+      turnBarA.classList.toggle('is-active', isTurnA && pct > 0);
+      turnBarB.classList.toggle('is-active', isTurnB && pct > 0);
+      turnBarA.classList.toggle('is-urgent', isTurnA && isUrgent);
+      turnBarB.classList.toggle('is-urgent', isTurnB && isUrgent);
+    } else if (status === 'LINEUP') {
+      const pct = Math.max(0, Math.min(100, (timeLeft / lineupDuration) * 100));
+      ringPct = pct;
+      turnBarA.style.width = `${pct}%`;
+      turnBarB.style.width = `${pct}%`;
+      turnBarA.classList.toggle('is-active', pct > 0);
+      turnBarB.classList.toggle('is-active', pct > 0);
+      turnBarA.classList.toggle('is-urgent', isUrgent);
+      turnBarB.classList.toggle('is-urgent', isUrgent);
+    } else {
+      ringPct = status === 'WAITING' ? 100 : 0;
+      turnBarA.style.width = '0%';
+      turnBarB.style.width = '0%';
+      turnBarA.classList.remove('is-active', 'is-urgent');
+      turnBarB.classList.remove('is-active', 'is-urgent');
+    }
+
+    if (timerCircle) {
+      const offset = circumference * (1 - ringPct / 100);
+      timerCircle.style.strokeDashoffset = `${offset}`;
+      const isBanStep = status === 'DRAFTING' && currentStep?.type === 'BAN';
+      timerCircle.style.stroke = isUrgent || isBanStep ? '#e84057' : '#0ac8b9';
+    }
+
+    const phasePill = document.getElementById('phaseTitlePill');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const turnInstruction = document.getElementById('turnInstruction');
+    const lineupBanner = document.getElementById('lineupPhaseBanner');
+
+    phasePill.className = 'center-phase-title';
+    timerDisplay.textContent = `${timeLeft}`;
+    timerDisplay.classList.toggle('urgent', timeLeft <= 10 && (status === 'DRAFTING' || status === 'LINEUP'));
+
+    lineupBanner.classList.toggle('hidden', status !== 'LINEUP');
+
+    if (status === 'WAITING') {
+      phasePill.textContent = '';
+      turnInstruction.textContent = '';
+    } else if (status === 'DRAFTING' && currentStep) {
+      const teamName = teams[currentStep.team].name;
+      phasePill.textContent = '';
+      turnInstruction.textContent = `${teamName} • ${currentStep.label}${isPaused ? ' (TẠM DỪNG)' : ''}`;
+    } else if (status === 'LINEUP') {
+      phasePill.textContent = '';
+      turnInstruction.textContent = 'Xếp đội';
+    } else if (status === 'COMPLETED') {
+      phasePill.textContent = '';
+      timerDisplay.textContent = 'LIVE';
+      turnInstruction.textContent = '';
+    }
+
+    const teamASwapHint = document.getElementById('teamASwapHint');
+    const teamBSwapHint = document.getElementById('teamBSwapHint');
+    if (teamASwapHint) teamASwapHint.textContent = '';
+    if (teamBSwapHint) teamBSwapHint.textContent = '';
+
+    const btnStart = document.getElementById('btnStartMatch');
+    const btnPause = document.getElementById('btnPauseMatch');
+    const btnUndo = document.getElementById('btnUndoStep');
+    if (btnStart) btnStart.disabled = status !== 'WAITING';
+    if (btnPause) {
+      btnPause.disabled = status !== 'DRAFTING' && status !== 'LINEUP';
+      btnPause.textContent = isPaused ? 'TIẾP TỤC' : 'TẠM DỪNG';
+    }
+    if (btnUndo) btnUndo.disabled = !roomState.canUndo;
+
+    const btnConfirmTeamLineup = document.getElementById('btnConfirmTeamLineup');
+    if (btnConfirmTeamLineup && clientRole === 'PLAYER') {
+      btnConfirmTeamLineup.classList.toggle('hidden', status === 'COMPLETED');
+      const isReady = teams[clientTeam]?.readyLineup;
+      btnConfirmTeamLineup.textContent = isReady ? 'ĐÃ CHỐT (SỬA LẠI)' : 'CHỐT ĐỘI HÌNH';
+    }
+  }
+
+  function renderSequenceBar() {
+    const bar = document.getElementById('sequenceBar');
+    if (!bar || !roomState.steps) return;
+
+    const clusters = [
+      { label: 'A Cấm 2', team: 'A', range: [0, 1] },
+      { label: 'B Cấm 2', team: 'B', range: [2, 3] },
+      { label: 'A Cấm 1', team: 'A', range: [4, 4] },
+      { label: 'B Cấm 1', team: 'B', range: [5, 5] },
+      { label: 'A Chọn 1', team: 'A', range: [6, 6] },
+      { label: 'B Chọn 2', team: 'B', range: [7, 8] },
+      { label: 'A Chọn 2', team: 'A', range: [9, 10] },
+      { label: 'B Chọn 2', team: 'B', range: [11, 12] },
+      { label: 'A Chọn 1', team: 'A', range: [13, 13] },
+      { label: 'B Cấm 1', team: 'B', range: [14, 14] },
+      { label: 'A Cấm 1', team: 'A', range: [15, 15] },
+      { label: 'B Cấm 1', team: 'B', range: [16, 16] },
+      { label: 'A Cấm 1', team: 'A', range: [17, 17] },
+      { label: 'B Chọn 1', team: 'B', range: [18, 18] },
+      { label: 'A Chọn 2', team: 'A', range: [19, 20] },
+      { label: 'B Chọn 2', team: 'B', range: [21, 22] },
+      { label: 'A Chọn 2', team: 'A', range: [23, 24] },
+      { label: 'B Chọn 1', team: 'B', range: [25, 25] }
+    ];
+
+    const html = clusters
+      .map((c) => {
+        let stateClass = '';
+        if (roomState.status === 'LINEUP' || roomState.status === 'COMPLETED') {
+          stateClass = 'done';
+        } else if (roomState.status === 'DRAFTING') {
+          if (roomState.stepIndex > c.range[1]) stateClass = 'done';
+          else if (roomState.stepIndex >= c.range[0] && roomState.stepIndex <= c.range[1]) {
+            stateClass = 'active';
+          }
+        }
+        return `<div class="seq-chip seq-team-${c.team.toLowerCase()} ${stateClass}">${c.label}</div>`;
+      })
+      .concat([
+        `<div class="seq-chip ${roomState.status === 'LINEUP' ? 'active' : ''}">Xếp Đội 90s</div>`
+      ])
+      .join('');
+
+    bar.innerHTML = html;
+  }
+
+  function renderBanSlots(teamKey, container) {
+    if (!container) return;
+    const bans = roomState.teams[teamKey].bans || [];
+    const cur = roomState.currentStep;
+
+    container.innerHTML = bans
+      .map((banItem, idx) => {
+        const isCurrentBanSlot =
+          roomState.status === 'DRAFTING' &&
+          cur &&
+          cur.type === 'BAN' &&
+          cur.team === teamKey &&
+          cur.slotIndex === idx;
+
+        const dividerClass = idx === 2 ? 'phase-divider-after' : '';
+        const activeClass = isCurrentBanSlot ? 'active-ban-slot' : '';
+
+        if (!banItem || !banItem.charId) {
+          if (isCurrentBanSlot && roomState.hoveredCharId) {
+            const hChar = window.MIHOYO_DATA.getCharacterById(roomState.hoveredCharId);
+            if (hChar) {
+              return `<div class="ban-slot ${dividerClass} ${activeClass}" title="${hChar.nameVi}">
+                ${buildSmartImgTag(hChar.iconUrls, hChar.name, hChar.element, hChar.nameVi)}
+                <div class="ban-slash"></div>
+              </div>`;
+            }
+          }
+          return `<div class="ban-slot ${dividerClass} ${activeClass}">
+            <span class="ban-slot-num">${idx + 1}</span>
+          </div>`;
+        }
+
+        if (banItem.charId === 'SKIPPED_BAN') {
+          return `<div class="ban-slot ${dividerClass}">
+            <span class="ban-slot-num">—</span>
+          </div>`;
+        }
+
+        const charObj = window.MIHOYO_DATA.getCharacterById(banItem.charId);
+        if (!charObj) {
+          return `<div class="ban-slot ${dividerClass}"><span class="ban-slot-num">—</span></div>`;
+        }
+
+        return `<div class="ban-slot ${dividerClass}" title="Đã cấm: ${charObj.nameVi}">
+          ${buildSmartImgTag(charObj.iconUrls, charObj.name, charObj.element, charObj.nameVi)}
+          <div class="ban-slash"></div>
+        </div>`;
+      })
+      .join('');
+  }
+
+  function renderTeamPicks(teamKey) {
+    const upperContainer = document.getElementById(teamKey === 'A' ? 'teamAUpperPicks' : 'teamBUpperPicks');
+    const lowerContainer = document.getElementById(teamKey === 'A' ? 'teamALowerPicks' : 'teamBLowerPicks');
+    if (!upperContainer || !lowerContainer) return;
+
+    const picks = roomState.teams[teamKey].picks || [];
+    const cur = roomState.currentStep;
+    const isCompleted = roomState.status === 'COMPLETED';
+
+    // Sau 90s (status === 'COMPLETED'): Khóa đổi đội hình, chỉ được phép chọn Cung mệnh & Vũ khí
+    const canPlayerSwapThisTeam =
+      !isCompleted && ((clientRole === 'PLAYER' && clientTeam === teamKey) || clientRole === 'SPEC');
+
+    const canEditMetaThisTeam =
+      clientRole === 'SPEC' || (clientRole === 'PLAYER' && clientTeam === teamKey);
+
+    const buildSlotHtml = (pickItem, slotIdx) => {
+      const isCurrentPickSlot =
+        roomState.status === 'DRAFTING' &&
+        cur &&
+        cur.type === 'PICK' &&
+        cur.team === teamKey &&
+        cur.slotIndex === slotIdx;
+
+      const isSelectedForSwap =
+        swapSource && swapSource.team === teamKey && swapSource.slotIndex === slotIdx;
+
+      if (!pickItem || !pickItem.charId) {
+        if (isCurrentPickSlot && roomState.hoveredCharId) {
+          const hChar = window.MIHOYO_DATA.getCharacterById(roomState.hoveredCharId);
+          if (hChar) {
+            return `
+              <div class="pick-slot-card active-pick-slot" data-team="${teamKey}" data-slot="${slotIdx}">
+                ${buildSmartImgTag(hChar.splashUrls || hChar.iconUrls, hChar.name, hChar.element, hChar.nameVi, 'slot-bg-watermark')}
+                <div class="slot-avatar-wrap">
+                  ${buildSmartImgTag(hChar.iconUrls, hChar.name, hChar.element, hChar.nameVi)}
+                </div>
+                <div class="slot-info">
+                  <div class="slot-char-name">${hChar.nameVi}</div>
+                  <div class="slot-empty-text" style="color:var(--lol-gold);">Đang chọn...</div>
+                </div>
+              </div>
+            `;
+          }
+        }
+
+        return `
+          <div class="pick-slot-card ${isCurrentPickSlot ? 'active-pick-slot' : ''} ${isSelectedForSwap ? 'selected-for-swap' : ''
+          }" data-team="${teamKey}" data-slot="${slotIdx}">
+            <div class="slot-avatar-wrap">
+              <span class="slot-index-num">${slotIdx + 1}</span>
+            </div>
+            <div class="slot-info">
+              <div class="slot-empty-text">
+                ${isCurrentPickSlot ? 'Đang chọn...' : ''}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      const charObj = window.MIHOYO_DATA.getCharacterById(pickItem.charId);
+      const charName = charObj ? charObj.nameVi : pickItem.charId;
+      const element = charObj ? charObj.element : 'Pyro';
+      const iconUrls = charObj ? charObj.iconUrls : [];
+      const splashUrls = charObj ? charObj.splashUrls || charObj.iconUrls : iconUrls;
+      const constBadge = pickItem.constellation || 'C0';
+      const weaponName = pickItem.weaponName || '';
+      const weaponRefine = pickItem.weaponRefine || 'R1';
+      const weaponObj = pickItem.weaponId ? window.MIHOYO_DATA.getWeaponById(pickItem.weaponId) : null;
+      const weaponIconUrls = weaponObj
+        ? weaponObj.iconUrls
+        : pickItem.weaponIcon
+          ? window.MIHOYO_DATA.getWeaponIconUrls(pickItem.weaponIcon)
+          : null;
+
+      return `
+        <div
+          class="pick-slot-card ${canPlayerSwapThisTeam || canEditMetaThisTeam ? 'interactive-slot' : ''} ${isSelectedForSwap ? 'selected-for-swap' : ''
+        }"
+          data-team="${teamKey}"
+          data-slot="${slotIdx}"
+          draggable="${canPlayerSwapThisTeam ? 'true' : 'false'}"
+        >
+          ${buildSmartImgTag(splashUrls, charName, element, charName, 'slot-bg-watermark')}
+          <div class="slot-avatar-wrap">
+            ${buildSmartImgTag(iconUrls, charName, element, charName)}
+            <span class="slot-element-badge">${ELEMENT_SVGS[element] || ''}</span>
+            <span class="slot-constellation-badge ${constBadge === 'C6' ? 'is-c6' : ''}">${constBadge}</span>
+          </div>
+
+          <div class="slot-info">
+            <div class="slot-char-name">${charName}</div>
+            ${weaponName
+          ? `<div class="slot-weapon-row">
+                    ${weaponIconUrls ? buildSmartImgTag(weaponIconUrls, weaponName, element, weaponName) : ''}
+                    <span class="slot-weapon-name">${weaponName}</span>
+                    <span class="slot-refine-tag">${weaponRefine}</span>
+                  </div>`
+          : `<div class="slot-weapon-row">
+                    <span class="slot-weapon-name" style="opacity:0.45;">${canEditMetaThisTeam ? 'Bấm để gán Vũ khí' : ''
+          }</span>
+                  </div>`
+        }
+          </div>
+
+          <div class="slot-actions">
+            ${canEditMetaThisTeam
+          ? `<button type="button" class="btn-slot-action btn-open-meta" data-team="${teamKey}" data-slot="${slotIdx}">CM/VK</button>`
+          : ''
+        }
+            ${canPlayerSwapThisTeam
+          ? `<button type="button" class="btn-slot-action btn-swap-slot" data-team="${teamKey}" data-slot="${slotIdx}">ĐỔI</button>`
+          : ''
+        }
+          </div>
+        </div>
+      `;
+    };
+
+    upperContainer.innerHTML = picks.slice(0, 4).map((p, i) => buildSlotHtml(p, i)).join('');
+    lowerContainer.innerHTML = picks.slice(4, 8).map((p, i) => buildSlotHtml(p, i + 4)).join('');
+
+    [upperContainer, lowerContainer].forEach((container) => {
+      container.querySelectorAll('.pick-slot-card').forEach((card) => {
+        const slotIdx = Number(card.getAttribute('data-slot'));
+        const tKey = card.getAttribute('data-team');
+
+        const btnMeta = card.querySelector('.btn-open-meta');
+        if (btnMeta) {
+          btnMeta.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCharMetaModal(tKey, slotIdx);
+          });
+        }
+
+        const btnSwap = card.querySelector('.btn-swap-slot');
+        if (btnSwap) {
+          btnSwap.addEventListener('click', (e) => {
+            e.stopPropagation();
+            handleSlotSwapClick(tKey, slotIdx);
+          });
+        }
+
+        card.addEventListener('click', () => {
+          if (isCompleted && canEditMetaThisTeam && picks[slotIdx]?.charId) {
+            openCharMetaModal(tKey, slotIdx);
+          } else if (clientRole === 'SPEC' && !swapSource && picks[slotIdx]?.charId) {
+            openCharMetaModal(tKey, slotIdx);
+          } else if (canPlayerSwapThisTeam) {
+            handleSlotSwapClick(tKey, slotIdx);
+          }
+        });
+
+        if (canPlayerSwapThisTeam) {
+          card.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', JSON.stringify({ team: tKey, slotIndex: slotIdx }));
+          });
+          card.addEventListener('dragover', (e) => {
+            e.preventDefault();
+          });
+          card.addEventListener('drop', (e) => {
+            e.preventDefault();
+            try {
+              const src = JSON.parse(e.dataTransfer.getData('text/plain'));
+              if (src && src.team === tKey && src.slotIndex !== slotIdx) {
+                sendAction('SWAP_LINEUP', {
+                  team: tKey,
+                  fromIndex: src.slotIndex,
+                  toIndex: slotIdx
+                });
+                swapSource = null;
+              }
+            } catch (err) { }
+          });
+        }
+      });
+    });
+  }
+
+  function handleSlotSwapClick(teamKey, slotIdx) {
+    if (roomState && roomState.status === 'COMPLETED') {
+      showToast('Đã hết 90s sắp xếp! Đội hình đã bị khóa, chỉ được chọn Cung mệnh & Vũ khí.');
+      return;
+    }
+    if (clientRole !== 'SPEC' && clientTeam !== teamKey) {
+      return;
+    }
+
+    if (!swapSource || swapSource.team !== teamKey) {
+      swapSource = { team: teamKey, slotIndex: slotIdx };
+      renderTeamPicks(teamKey);
+      return;
+    }
+
+    if (swapSource.slotIndex === slotIdx) {
+      swapSource = null;
+      renderTeamPicks(teamKey);
+      return;
+    }
+
+    const fromIndex = swapSource.slotIndex;
+    swapSource = null;
+    sendAction('SWAP_LINEUP', {
+      team: teamKey,
+      fromIndex,
+      toIndex: slotIdx
+    });
+  }
+
+  function renderLockinBar() {
+    const charNameEl = document.getElementById('hoveredCharName');
+    const btnLockIn = document.getElementById('btnLockIn');
+    const btnSkipBan = document.getElementById('btnSkipBan');
+
+    const cur = roomState.currentStep;
+    const isDrafting = roomState.status === 'DRAFTING' && cur;
+    const canActNow =
+      isDrafting && (clientRole === 'SPEC' || (clientRole === 'PLAYER' && clientTeam === cur.team));
+
+    btnSkipBan.classList.toggle('hidden', !(canActNow && cur.type === 'BAN'));
+
+    if (!isDrafting) {
+      charNameEl.textContent = '';
+      btnLockIn.disabled = true;
+      btnLockIn.classList.remove('is-ban-lock');
+      btnLockIn.innerHTML = '<span>KHÓA</span>';
+      return;
+    }
+
+    const hChar = roomState.hoveredCharId
+      ? window.MIHOYO_DATA.getCharacterById(roomState.hoveredCharId)
+      : null;
+
+    charNameEl.textContent = hChar ? hChar.nameVi : '';
+    btnLockIn.disabled = !(canActNow && hChar);
+    btnLockIn.classList.toggle('is-ban-lock', cur.type === 'BAN');
+    btnLockIn.innerHTML = `<span>${cur.type === 'BAN' ? 'CẤM' : 'KHÓA'}</span>`;
+  }
+
+  function renderCharacterGrid() {
+    const grid = document.getElementById('characterGrid');
+    if (!grid) return;
+
+    const allChars = window.MIHOYO_DATA.getCharacters();
+    const normQuery = window.MIHOYO_DATA.normalizeSearchText(searchQuery);
+
+    const bannedMap = new Map();
+    const pickedMap = new Map();
+
+    ['A', 'B'].forEach((tKey) => {
+      (roomState.teams[tKey].bans || []).forEach((b) => {
+        if (b && b.charId && b.charId !== 'SKIPPED_BAN') bannedMap.set(b.charId, tKey);
+      });
+      (roomState.teams[tKey].picks || []).forEach((p) => {
+        if (p && p.charId) pickedMap.set(p.charId, tKey);
+      });
+    });
+
+    const filtered = allChars.filter((c) => {
+      if (selectedElement !== 'ALL' && c.element !== selectedElement) return false;
+      if (selectedWeaponType !== 'ALL' && c.weaponType !== selectedWeaponType) return false;
+      if (selectedRarity !== 'ALL' && String(c.rarity) !== String(selectedRarity)) return false;
+      if (normQuery) {
+        const haystack = window.MIHOYO_DATA.normalizeSearchText(`${c.name} ${c.nameVi} ${c.id}`);
+        if (!haystack.includes(normQuery)) return false;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding: 32px; color: var(--lol-grey);">
+        Không tìm thấy tướng phù hợp.
+      </div>`;
+      return;
+    }
+
+    grid.innerHTML = filtered
+      .map((c) => {
+        const bannedBy = bannedMap.get(c.id);
+        const pickedBy = pickedMap.get(c.id);
+        const isTaken = Boolean(bannedBy || pickedBy);
+        const isHovered = roomState.hoveredCharId === c.id;
+
+        let overlayHtml = '';
+        if (bannedBy) {
+          overlayHtml = `<div class="char-status-overlay status-banned">ĐÃ CẤM</div>`;
+        } else if (pickedBy) {
+          overlayHtml = `<div class="char-status-overlay">ĐÃ CHỌN</div>`;
+        }
+
+        return `
+          <div
+            class="char-card ${isTaken ? 'char-disabled' : ''} ${isHovered ? 'char-hovered' : ''}"
+            data-char-id="${c.id}"
+            title="${c.nameVi}"
+          >
+            <div class="char-portrait">
+              ${buildSmartImgTag(c.iconUrls, c.name, c.element, c.nameVi)}
+              <span class="char-el-tag">${ELEMENT_SVGS[c.element] || ''}</span>
+              ${overlayHtml}
+            </div>
+            <div class="char-card-name">${c.nameVi}</div>
+          </div>
+        `;
+      })
+      .join('');
+
+    grid.querySelectorAll('.char-card:not(.char-disabled)').forEach((card) => {
+      const charId = card.getAttribute('data-char-id');
+      card.addEventListener('click', () => {
+        if (roomState.status !== 'DRAFTING') return;
+        sendAction('HOVER_CHAR', { charId });
+      });
+
+      card.addEventListener('dblclick', () => {
+        if (roomState.status !== 'DRAFTING') return;
+        const charObj = window.MIHOYO_DATA.getCharacterById(charId);
+        sendAction('LOCK_CHAR', {
+          charId,
+          charLabel: charObj ? charObj.nameVi : charId
+        });
+      });
+    });
+  }
+
+  function openCharMetaModal(teamKey, slotIndex) {
+    if (clientRole !== 'SPEC' && clientTeam !== teamKey) return;
+    const slot = roomState?.teams?.[teamKey]?.picks?.[slotIndex];
+    if (!slot || !slot.charId) return;
+
+    const charObj = window.MIHOYO_DATA.getCharacterById(slot.charId);
+    editingMetaTarget = {
+      team: teamKey,
+      slotIndex,
+      charId: slot.charId,
+      weaponType: charObj ? charObj.weaponType : 'ALL'
+    };
+
+    modalConstellation = slot.constellation || 'C0';
+    modalRefine = slot.weaponRefine || 'R1';
+    modalWeaponId = slot.weaponId || null;
+    modalWeaponName = slot.weaponName || '';
+    modalWeaponIcon = slot.weaponIcon || '';
+
+    const summaryEl = document.getElementById('metaCharSummary');
+    if (charObj) {
+      summaryEl.innerHTML = `
+        ${buildSmartImgTag(charObj.iconUrls, charObj.name, charObj.element, charObj.nameVi)}
+        <div>
+          <div style="font-size:14px; color:var(--lol-gold-bright);">${charObj.nameVi}</div>
+          <div style="font-size:11px; color:var(--lol-grey);">
+            ${roomState.teams[teamKey].name} • Ô #${slotIndex + 1} (${slotIndex < 4 ? 'Nửa Trên' : 'Nửa Dưới'
+        })
+          </div>
+        </div>
+      `;
+    }
+
+    document.getElementById('weaponSearchInput').value = modalWeaponName;
+    updateModalPillsUI();
+    renderWeaponPickerList('');
+
+    document.getElementById('charMetaModal').classList.remove('hidden');
+  }
+
+  function updateModalPillsUI() {
+    document.querySelectorAll('#constellationPills .const-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-const') === modalConstellation);
+    });
+    document.querySelectorAll('#refinePills .refine-pill').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-refine') === modalRefine);
+    });
+  }
+
+  function renderWeaponPickerList(filterText) {
+    const grid = document.getElementById('weaponPickerGrid');
+    if (!grid || !editingMetaTarget) return;
+
+    const weaponPool = window.MIHOYO_DATA.getWeapons(editingMetaTarget.weaponType);
+    const norm = window.MIHOYO_DATA.normalizeSearchText(filterText);
+
+    const filtered = weaponPool.filter((w) => {
+      if (!norm) return true;
+      const hay = window.MIHOYO_DATA.normalizeSearchText(`${w.nameVi} ${w.name}`);
+      return hay.includes(norm);
+    });
+
+    grid.innerHTML = filtered
+      .map((w) => {
+        const isSel = modalWeaponId === w.id || modalWeaponName === w.nameVi;
+        return `
+          <div class="weapon-option-card ${isSel ? 'selected' : ''}" data-wep-id="${w.id}">
+            ${buildSmartImgTag(w.iconUrls, w.nameVi, 'Geo', w.nameVi)}
+            <div>
+              <div class="weapon-option-name">${w.nameVi}</div>
+              <div style="font-size:9.5px; color:var(--lol-gold);">${w.rarity} SAO</div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    grid.querySelectorAll('.weapon-option-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        const wepId = card.getAttribute('data-wep-id');
+        const wepObj = window.MIHOYO_DATA.getWeaponById(wepId);
+        if (wepObj) {
+          modalWeaponId = wepObj.id;
+          modalWeaponName = wepObj.nameVi;
+          modalWeaponIcon = wepObj.icon;
+          document.getElementById('weaponSearchInput').value = wepObj.nameVi;
+          renderWeaponPickerList('');
+        }
+      });
+    });
+  }
+
+  function updateShareLinksInputs() {
+    const fbInputVal = (document.getElementById('inputFirebaseUrl')?.value || firebaseDbUrl || '').trim().replace(/\/+$/, '');
+    const fbQuery = fbInputVal ? `&fb=${encodeURIComponent(fbInputVal)}` : '';
+    const baseUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}${fbQuery}`;
+    document.getElementById('shareLinkSpec').value = `${baseUrl}&role=SPEC`;
+    document.getElementById('shareLinkTeamA').value = `${baseUrl}&role=PLAYER&team=A`;
+    document.getElementById('shareLinkTeamB').value = `${baseUrl}&role=PLAYER&team=B`;
+  }
+
+  function openSettingsModal() {
+    if (clientRole !== 'SPEC') return;
+    const titleCode = document.getElementById('settingsRoomCodeTitle');
+    if (titleCode) titleCode.textContent = currentRoomId;
+
+    if (roomState) {
+      document.getElementById('inputTeamAName').value = roomState.teams.A.name;
+      document.getElementById('inputTeamBName').value = roomState.teams.B.name;
+      document.getElementById('inputBanDuration').value = roomState.banDuration;
+      document.getElementById('inputPickDuration').value = roomState.pickDuration;
+      document.getElementById('inputLineupDuration').value = roomState.lineupDuration;
+    }
+    const fbInput = document.getElementById('inputFirebaseUrl');
+    if (fbInput) fbInput.value = firebaseDbUrl;
+    updateShareLinksInputs();
+    document.getElementById('settingsModal').classList.remove('hidden');
+  }
+
+  function bindEvents() {
+    // Điều khiển Nhạc nền (/sprites/musics/music-ban-pick.m4a)
+    document.getElementById('btnToggleBgm').addEventListener('click', () => {
+      isBgmPlaying = !isBgmPlaying;
+      updateBgmPlayback();
+    });
+
+    document.getElementById('bgmVolumeSlider').addEventListener('input', (e) => {
+      bgmVolume = Number(e.target.value) / 100;
+      const audioEl = document.getElementById('genshinBgmAudio');
+      if (audioEl) audioEl.volume = bgmVolume;
+    });
+
+    // Sảnh trận đấu & Chế độ Full Màn Hình Khán Giả
+    document.getElementById('btnToggleMainMenu').addEventListener('click', () => {
+      const overlay = document.getElementById('mainMenuOverlay');
+      if (overlay.classList.contains('hidden')) openMainMenu();
+      else closeMainMenu();
+    });
+
+    const btnTogglePoolView = document.getElementById('btnTogglePoolView');
+    if (btnTogglePoolView) {
+      btnTogglePoolView.addEventListener('click', () => {
+        if (clientRole !== 'SPEC') return;
+        setSpectatorFullscreen(!isSpectatorFullscreen);
+      });
+    }
+
+    document.getElementById('btnCloseMainMenu').addEventListener('click', closeMainMenu);
+
+    document.getElementById('btnGenerateRoomId').addEventListener('click', () => {
+      document.getElementById('menuNewRoomId').value = generateRandomMatchId();
+    });
+
+    document.getElementById('btnCreateNewMatch').addEventListener('click', async () => {
+      const newId = document.getElementById('menuNewRoomId').value || generateRandomMatchId();
+      const teamAName = document.getElementById('menuNewTeamA').value || 'ĐỘI XANH';
+      const teamBName = document.getElementById('menuNewTeamB').value || 'ĐỘI ĐỎ';
+      const banDuration = Number(document.getElementById('menuNewBanSec').value) || 45;
+      const pickDuration = Number(document.getElementById('menuNewPickSec').value) || 60;
+      const lineupDuration = Number(document.getElementById('menuNewLineupSec').value) || 90;
+
+      await switchMatchRoom(newId, {
+        teamAName,
+        teamBName,
+        banDuration,
+        pickDuration,
+        lineupDuration
+      });
+
+      openSettingsModal();
+    });
+
+    document.getElementById('btnJoinRoomById').addEventListener('click', () => {
+      const joinId = document.getElementById('menuJoinRoomInput').value;
+      if (!joinId || !joinId.trim()) return;
+      switchMatchRoom(joinId);
+    });
+
+    document.getElementById('btnRefreshRooms').addEventListener('click', loadActiveRoomsList);
+
+    document.getElementById('btnRolePlayerA').addEventListener('click', () => {
+      if (clientRole !== 'SPEC') return;
+      if (confirm('Khóa màn hình này vào vai trò Tuyển thủ ĐỘI XANH (A)?')) {
+        clientRole = 'PLAYER';
+        clientTeam = 'A';
+        swapSource = null;
+        closeMainMenu();
+        renderRoleUI();
+      }
+    });
+
+    document.getElementById('btnRolePlayerB').addEventListener('click', () => {
+      if (clientRole !== 'SPEC') return;
+      if (confirm('Khóa màn hình này vào vai trò Tuyển thủ ĐỘI ĐỎ (B)?')) {
+        clientRole = 'PLAYER';
+        clientTeam = 'B';
+        swapSource = null;
+        closeMainMenu();
+        renderRoleUI();
+      }
+    });
+
+    document.getElementById('btnConfirmTeamLineup').addEventListener('click', () => {
+      sendAction('CONFIRM_LINEUP', { team: clientTeam });
+    });
+
+    document.getElementById('btnStartMatch').addEventListener('click', () => {
+      autoPlayAndUnmuteBgm();
+      sendAction('START_MATCH');
+    });
+
+    document.getElementById('btnPauseMatch').addEventListener('click', () => {
+      sendAction('TOGGLE_PAUSE');
+    });
+
+    document.getElementById('btnSwapTeamsBtc').addEventListener('click', () => {
+      if (clientRole !== 'SPEC') return;
+      sendAction('SWAP_TEAMS');
+    });
+
+    document.getElementById('btnUndoStep').addEventListener('click', () => {
+      sendAction('UNDO_STEP');
+    });
+
+    document.getElementById('btnEnterLineup').addEventListener('click', () => {
+      sendAction('ENTER_LINEUP_PHASE');
+    });
+
+    const btnEnterStreamPhase = document.getElementById('btnEnterStreamPhase');
+    if (btnEnterStreamPhase) {
+      btnEnterStreamPhase.addEventListener('click', () => {
+        swapSource = null;
+        autoPauseAndMuteBgm();
+        sendAction('ENTER_STREAM_PHASE');
+      });
+    }
+
+    // Điều khiển Sân Khấu Stream Đôi
+    const btnToggleStreamSplit = document.getElementById('btnToggleStreamSplit');
+    if (btnToggleStreamSplit) {
+      btnToggleStreamSplit.addEventListener('click', () => {
+        isVerticalStreamSplit = !isVerticalStreamSplit;
+        const grid = document.getElementById('dualStreamGrid');
+        if (grid) {
+          grid.classList.toggle('split-vertical', isVerticalStreamSplit);
+          grid.classList.toggle('split-horizontal', !isVerticalStreamSplit);
+        }
+      });
+    }
+
+    ['A', 'B'].forEach((tKey) => {
+      const btnShare = document.getElementById(`btnShareScreen${tKey}`);
+      const btnQuickShare = document.getElementById(`btnQuickShare${tKey}`);
+      const btnStop = document.getElementById(`btnStopScreen${tKey}`);
+      const btnSetEmbed = document.getElementById(`btnSetEmbed${tKey}`);
+      const inputEmbed = document.getElementById(`inputEmbedUrl${tKey}`);
+      const btnMute = document.getElementById(`btnMuteStream${tKey}`);
+      const btnFs = document.getElementById(`btnFullscreenStream${tKey}`);
+
+      if (btnShare) {
+        btnShare.addEventListener('click', () => startDiscordScreenShare(tKey));
+      }
+      if (btnQuickShare) {
+        btnQuickShare.addEventListener('click', () => startDiscordScreenShare(tKey));
+      }
+      if (btnStop) {
+        btnStop.addEventListener('click', () => stopDiscordScreenShare(tKey));
+      }
+
+      const applyEmbedUrlForTeam = async () => {
+        if (clientRole !== 'SPEC' && clientTeam !== tKey) {
+          return;
+        }
+        const rawVal = inputEmbed ? inputEmbed.value.trim() : '';
+        const cleanEmbed = normalizeStreamEmbedUrl(rawVal);
+        await sendAction('UPDATE_STREAM_INFO', {
+          team: tKey,
+          embedUrl: cleanEmbed,
+          active: Boolean(cleanEmbed)
+        });
+        renderDualStreamStage();
+      };
+
+      if (btnSetEmbed) {
+        btnSetEmbed.addEventListener('click', applyEmbedUrlForTeam);
+      }
+      if (inputEmbed) {
+        inputEmbed.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            applyEmbedUrlForTeam();
+          }
+        });
+      }
+      if (btnMute) {
+        btnMute.addEventListener('click', () => {
+          const videoEl = document.getElementById(`streamVideo${tKey}`);
+          if (!videoEl) return;
+          videoEl.muted = !videoEl.muted;
+          btnMute.textContent = videoEl.muted ? '🔇' : '🔊';
+        });
+      }
+      if (btnFs) {
+        btnFs.addEventListener('click', () => {
+          const viewport = document.getElementById(`streamViewport${tKey}`);
+          if (!viewport) return;
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.();
+          } else {
+            viewport.requestFullscreen?.();
+          }
+        });
+      }
+    });
+
+    document.getElementById('btnResetMatch').addEventListener('click', () => {
+      if (confirm('Reset toàn bộ trận đấu này về từ đầu?')) {
+        swapSource = null;
+        sendAction('RESET_MATCH');
+      }
+    });
+
+    document.getElementById('btnOpenSettings').addEventListener('click', openSettingsModal);
+    document.getElementById('inputFirebaseUrl')?.addEventListener('input', updateShareLinksInputs);
+
+    document.getElementById('btnLockIn').addEventListener('click', () => {
+      if (!roomState?.hoveredCharId) return;
+      const charObj = window.MIHOYO_DATA.getCharacterById(roomState.hoveredCharId);
+      sendAction('LOCK_CHAR', {
+        charId: roomState.hoveredCharId,
+        charLabel: charObj ? charObj.nameVi : roomState.hoveredCharId
+      });
+    });
+
+    document.getElementById('btnSkipBan').addEventListener('click', () => {
+      sendAction('SKIP_BAN');
+    });
+
+    const searchInput = document.getElementById('charSearchInput');
+    const btnClearSearch = document.getElementById('btnClearSearch');
+
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value;
+      btnClearSearch.classList.toggle('hidden', !searchQuery);
+      renderCharacterGrid();
+    });
+
+    btnClearSearch.addEventListener('click', () => {
+      searchQuery = '';
+      searchInput.value = '';
+      btnClearSearch.classList.add('hidden');
+      renderCharacterGrid();
+    });
+
+    document.querySelectorAll('#elementFilters .role-icon-btn').forEach((chip) => {
+      chip.addEventListener('click', () => {
+        selectedElement = chip.getAttribute('data-element') || 'ALL';
+        document.querySelectorAll('#elementFilters .role-icon-btn').forEach((c) => c.classList.remove('active'));
+        chip.classList.add('active');
+        renderCharacterGrid();
+      });
+    });
+
+    document.getElementById('weaponTypeSelect').addEventListener('change', (e) => {
+      selectedWeaponType = e.target.value;
+      renderCharacterGrid();
+    });
+
+    document.getElementById('raritySelect').addEventListener('change', (e) => {
+      selectedRarity = e.target.value;
+      renderCharacterGrid();
+    });
+
+    document.querySelectorAll('#constellationPills .const-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        modalConstellation = btn.getAttribute('data-const');
+        updateModalPillsUI();
+      });
+    });
+
+    document.querySelectorAll('#refinePills .refine-pill').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        modalRefine = btn.getAttribute('data-refine');
+        updateModalPillsUI();
+      });
+    });
+
+    document.getElementById('weaponSearchInput').addEventListener('input', (e) => {
+      modalWeaponName = e.target.value;
+      modalWeaponId = null;
+      modalWeaponIcon = '';
+      renderWeaponPickerList(e.target.value);
+    });
+
+    document.getElementById('btnClearWeaponMeta').addEventListener('click', () => {
+      modalWeaponId = null;
+      modalWeaponName = '';
+      modalWeaponIcon = '';
+      document.getElementById('weaponSearchInput').value = '';
+      renderWeaponPickerList('');
+    });
+
+    const closeMetaModal = () => {
+      document.getElementById('charMetaModal').classList.add('hidden');
+      editingMetaTarget = null;
+    };
+    document.getElementById('btnCloseMetaModal').addEventListener('click', closeMetaModal);
+    document.getElementById('btnCancelMetaModal').addEventListener('click', closeMetaModal);
+
+    document.getElementById('btnSaveCharMeta').addEventListener('click', () => {
+      if (!editingMetaTarget) return;
+      sendAction('UPDATE_CHAR_META', {
+        targetTeam: editingMetaTarget.team,
+        slotIndex: editingMetaTarget.slotIndex,
+        constellation: modalConstellation,
+        weaponId: modalWeaponId,
+        weaponName: modalWeaponName.trim(),
+        weaponIcon: modalWeaponIcon,
+        weaponRefine: modalRefine
+      });
+      closeMetaModal();
+    });
+
+    const closeSettings = () => document.getElementById('settingsModal').classList.add('hidden');
+    document.getElementById('btnCloseSettingsModal').addEventListener('click', closeSettings);
+    document.getElementById('btnCancelSettings').addEventListener('click', closeSettings);
+
+    document.getElementById('btnSaveSettings').addEventListener('click', () => {
+      if (clientRole !== 'SPEC') {
+        closeSettings();
+        return;
+      }
+
+      const newFbUrl = (document.getElementById('inputFirebaseUrl')?.value || '').trim().replace(/\/+$/, '');
+      if (newFbUrl !== firebaseDbUrl) {
+        firebaseDbUrl = newFbUrl;
+        if (firebaseDbUrl) localStorage.setItem('hoyo_fb_url', firebaseDbUrl);
+        else localStorage.removeItem('hoyo_fb_url');
+        connectRealtime();
+      }
+
+      sendAction('UPDATE_SETTINGS', {
+        teamAName: document.getElementById('inputTeamAName').value,
+        teamBName: document.getElementById('inputTeamBName').value,
+        banDuration: Number(document.getElementById('inputBanDuration').value),
+        pickDuration: Number(document.getElementById('inputPickDuration').value),
+        lineupDuration: Number(document.getElementById('inputLineupDuration').value)
+      });
+      closeSettings();
+    });
+
+    document.querySelectorAll('[data-copy-target]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const inputId = btn.getAttribute('data-copy-target');
+        const inputEl = document.getElementById(inputId);
+        if (inputEl) {
+          inputEl.select();
+          navigator.clipboard?.writeText(inputEl.value);
+          showToast('Đã sao chép đường dẫn.');
+        }
+      });
+    });
+
+    // Phát hiệu ứng click-button-sound cho mọi nút bấm tương tác trên giao diện
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('button:not(:disabled), .role-icon-btn, .const-pill, .refine-pill, .weapon-option-card');
+      if (btn && btn.id !== 'btnLockIn') {
+        playLolSfx('click-button-sound');
+      }
+    });
+  }
+
+  function updateLoadingProgress(pct) {
+    const fill = document.getElementById('lolLoadingBarFill');
+    const label = document.getElementById('lolLoadingPct');
+    const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+    if (fill) fill.style.width = `${clamped}%`;
+    if (label) label.textContent = `${clamped}%`;
+  }
+
+  function finishLoadingOverlay() {
+    updateLoadingProgress(100);
+    const overlay = document.getElementById('lolLoadingOverlay');
+    if (overlay) {
+      setTimeout(() => {
+        overlay.classList.add('is-loaded');
+      }, 220);
+    }
+  }
+
+  async function init() {
+    updateLoadingProgress(18);
+    initHextechParticles();
+    initPeerEngine();
+    updateLoadingProgress(42);
+    bindEvents();
+    renderRoleUI();
+    connectRealtime();
+    updateLoadingProgress(68);
+
+    if (!hasExplicitRoomParam && clientRole === 'SPEC') {
+      openMainMenu();
+    }
+
+    if (!firebaseDbUrl) {
+      try {
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
+        const json = await res.json();
+        if (json.ok && json.state) {
+          applyRoomState(json.state);
+        }
+      } catch (e) {
+        if (window.DRAFT_ENGINE && rawRoomMemory) {
+          applyRoomState(window.DRAFT_ENGINE.getSerializedState(rawRoomMemory));
+        }
+      }
+    }
+
+    updateLoadingProgress(88);
+    await window.MIHOYO_DATA.syncFromLiveAPIs();
+    if (roomState) {
+      renderAll();
+    }
+    finishLoadingOverlay();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+})();
