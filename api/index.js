@@ -101,9 +101,32 @@ module.exports = (req, res) => {
       } else if (!body || typeof body !== 'object') {
         body = {};
       }
-      const targetRoom = getRoom(body.roomId || roomId);
+      const targetRoomId = String(body.roomId || roomId || 'MAIN').toUpperCase().trim() || 'MAIN';
+      let targetRoom = getRoom(targetRoomId);
+
+      // Đồng bộ trạng thái mới nhất từ Client nếu request rơi vào một Serverless Instance khác bị cũ (cold/multi-instance)
+      if (body.clientSnapshot && typeof body.clientSnapshot === 'object') {
+        const snapRev = Number(body.clientSnapshot.revision || 0);
+        const curRev = Number(targetRoom.revision || 0);
+        if (snapRev > curRev) {
+          targetRoom = DraftEngine.normalizeRoomState(body.clientSnapshot, targetRoomId);
+          targetRoom.lastTickAt = Date.now();
+          rooms.set(targetRoomId, targetRoom);
+        }
+      }
+
+      if (body.action === 'SYNC_SNAPSHOT') {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(200).json({
+          ok: true,
+          state: DraftEngine.getSerializedState(targetRoom)
+        });
+        return;
+      }
+
       const result = DraftEngine.applyAction(targetRoom, body);
       targetRoom.lastTickAt = Date.now();
+      res.setHeader('Cache-Control', 'no-store');
       res.status(result.ok ? 200 : 400).json({
         ...result,
         state: DraftEngine.getSerializedState(targetRoom)

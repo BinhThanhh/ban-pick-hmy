@@ -185,6 +185,8 @@
   function createInitialRoomState(roomId = 'MAIN') {
     return {
       roomId,
+      revision: 0,
+      updatedAt: Date.now(),
       game: 'genshin',
       status: 'WAITING', // 'WAITING' | 'DRAFTING' | 'LINEUP' | 'COMPLETED'
       isPaused: false,
@@ -257,6 +259,8 @@
 
     return {
       roomId: raw.roomId || roomId,
+      revision: typeof raw.revision === 'number' ? raw.revision : 0,
+      updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now(),
       game: raw.game || 'genshin',
       status: raw.status || 'WAITING',
       isPaused: Boolean(raw.isPaused),
@@ -397,12 +401,18 @@
     return { ok: true };
   }
 
+  function bumpRevision(room) {
+    room.revision = (typeof room.revision === 'number' ? room.revision : 0) + 1;
+    room.updatedAt = Date.now();
+  }
+
   function tickRoomTimer(room) {
     if (room.isPaused) return false;
 
     if (room.status === 'DRAFTING') {
       if (room.timeLeft > 0) {
         room.timeLeft -= 1;
+        bumpRevision(room);
         return true;
       } else {
         const step = getCurrentStep(room);
@@ -411,11 +421,13 @@
         if (step.type === 'BAN') {
           // Hết thời gian Cấm mà chưa khóa -> Tính là Skip Ban (Bỏ lượt cấm)
           lockSelection(room, 'SKIPPED_BAN', 'Bỏ lượt cấm (Hết giờ)', true);
+          bumpRevision(room);
           return true;
         } else {
           // Hết thời gian Chọn mà chưa khóa -> Tự động chọn ngẫu nhiên 1 nhân vật chưa bị cấm/chọn
           const randomChar = getRandomAvailableCharacter(room);
           lockSelection(room, randomChar.id, `${randomChar.name} (Ngẫu nhiên)`, true);
+          bumpRevision(room);
           return true;
         }
       }
@@ -426,6 +438,7 @@
           room.status = 'COMPLETED';
           addLog(room, 'Hết 90 giây sắp xếp đội hình! Đội hình 2 bên đã được chốt.');
         }
+        bumpRevision(room);
         return true;
       }
     }
@@ -445,6 +458,14 @@
   }
 
   function applyAction(room, body) {
+    const res = applyActionInternal(room, body);
+    if (res && res.ok) {
+      bumpRevision(room);
+    }
+    return res;
+  }
+
+  function applyActionInternal(room, body) {
     const { action, role, team, payload = {} } = body;
 
     switch (action) {
@@ -497,7 +518,9 @@
         const pickDur = room.pickDuration;
         const lineupDur = room.lineupDuration;
 
+        const nextRev = (typeof room.revision === 'number' ? room.revision : 0) + 1;
         const fresh = createInitialRoomState(room.roomId);
+        fresh.revision = nextRev;
         fresh.teams.A.name = nameA;
         fresh.teams.B.name = nameB;
         fresh.banDuration = banDur;

@@ -47,7 +47,20 @@
   let wsConnection = null;
   let sseConnection = null;
   let vercelPollTimer = null;
+  let localTickTimer = null;
   let localBroadcast = null;
+  let inFlightActions = 0;
+  let isPollingState = false;
+  let lastCharacterGridSignature = '';
+  const domRenderCache = {
+    seqBar: '',
+    banA: '',
+    banB: '',
+    upperA: '',
+    lowerA: '',
+    upperB: '',
+    lowerB: ''
+  };
 
   // ==================== ICON NGUYÊN TỐ CHÍNH THỨC (/sprites/element-icons) ====================
   const ELEMENT_SPRITE_URLS = {
@@ -277,34 +290,47 @@
   }
 
   async function sendAction(action, payload = {}) {
+    const baseSnapshot = roomState
+      ? JSON.parse(JSON.stringify(roomState))
+      : rawRoomMemory
+        ? JSON.parse(JSON.stringify(rawRoomMemory))
+        : null;
+
     const body = {
       roomId: currentRoomId,
       action,
       role: clientRole,
       team: clientTeam,
-      payload
+      payload,
+      clientSnapshot: baseSnapshot
     };
+
+    // Optimistic UI: Phản hồi ngay lập tức trên giao diện 0ms không chờ mạng
+    if (window.DRAFT_ENGINE && (roomState || rawRoomMemory)) {
+      const tempRoom = window.DRAFT_ENGINE.normalizeRoomState(baseSnapshot, currentRoomId);
+      const optimisticRes = window.DRAFT_ENGINE.applyAction(tempRoom, body);
+      if (!optimisticRes.ok) {
+        if (optimisticRes.error) showToast(optimisticRes.error);
+        return optimisticRes;
+      }
+      rawRoomMemory = tempRoom;
+      const optimisticSerialized = window.DRAFT_ENGINE.getSerializedState(tempRoom);
+      applyRoomState(optimisticSerialized, { forceAccept: true });
+      localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: optimisticSerialized });
+    }
+
+    inFlightActions += 1;
 
     if (firebaseDbUrl && window.DRAFT_ENGINE) {
       try {
-        const endpoint = getFirebaseRoomEndpoint(currentRoomId);
-        const resGet = await fetch(endpoint);
-        const latestRaw = resGet.ok ? await resGet.json() : null;
-        rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(latestRaw || rawRoomMemory, currentRoomId);
-
-        const result = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
-        if (!result.ok) {
-          if (result.error) showToast(result.error);
-          return result;
-        }
         await pushStateToFirebase(rawRoomMemory, currentRoomId);
         const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
-        applyRoomState(serialized);
-        localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
         return { ok: true, state: serialized };
       } catch (err) {
         showToast('Lỗi đồng bộ Firebase Realtime Database.');
         return { ok: false };
+      } finally {
+        inFlightActions = Math.max(0, inFlightActions - 1);
       }
     }
 
@@ -316,14 +342,8 @@
       });
       const data = await res.json();
       if (!data.ok && data.error && data.error.includes('Hành động không hợp lệ') && window.DRAFT_ENGINE) {
-        rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(roomState || rawRoomMemory, currentRoomId);
-        const fallbackRes = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
-        if (fallbackRes.ok) {
-          const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
-          applyRoomState(serialized);
-          localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
-          return { ok: true, state: serialized };
-        }
+        const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+        return { ok: true, state: serialized };
       }
       if (!data.ok && data.error) {
         showToast(data.error);
@@ -335,18 +355,13 @@
       return data;
     } catch (err) {
       if (window.DRAFT_ENGINE && rawRoomMemory) {
-        const result = window.DRAFT_ENGINE.applyAction(rawRoomMemory, body);
-        if (!result.ok && result.error) {
-          showToast(result.error);
-          return result;
-        }
         const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
-        applyRoomState(serialized);
-        localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: serialized });
         return { ok: true, state: serialized };
       }
       showToast('Không thể kết nối máy chủ.');
       return { ok: false };
+    } finally {
+      inFlightActions = Math.max(0, inFlightActions - 1);
     }
   }
 
@@ -386,6 +401,22 @@
       clearInterval(vercelPollTimer);
       vercelPollTimer = null;
     }
+    if (localTickTimer) {
+      clearInterval(localTickTimer);
+      localTickTimer = null;
+    }
+
+    // Đồng hồ đếm ngược nội bộ chạy độc lập 1s/lần ngay trên trình duyệt để không bị khựng hay delay do mạng
+    localTickTimer = setInterval(() => {
+      if (!roomState || roomState.isPaused) return;
+      if (roomState.status !== 'DRAFTING' && roomState.status !== 'LINEUP') return;
+      if (roomState.timeLeft > 0) {
+        roomState.timeLeft = Math.max(0, roomState.timeLeft - 1);
+        lastTimeLeft = roomState.timeLeft;
+        renderHeaderAndClock();
+        triggerGsapTimerTick(roomState.timeLeft);
+      }
+    }, 1000);
 
     if (firebaseDbUrl && window.DRAFT_ENGINE) {
       syncTag.textContent = 'FIREBASE';
@@ -408,11 +439,13 @@
         });
 
       vercelPollTimer = setInterval(async () => {
+        if (inFlightActions > 0 || isPollingState) return;
+        isPollingState = true;
         try {
           const r = await fetch(endpoint);
           if (!r.ok) return;
           const data = await r.json();
-          if (data) {
+          if (data && inFlightActions === 0) {
             rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, currentRoomId);
             if (clientRole === 'SPEC') {
               const ticked = window.DRAFT_ENGINE.tickRoomTimer(rawRoomMemory);
@@ -422,7 +455,9 @@
             }
             applyRoomState(window.DRAFT_ENGINE.getSerializedState(rawRoomMemory));
           }
-        } catch (e) { }
+        } catch (e) { } finally {
+          isPollingState = false;
+        }
       }, 1000);
 
       return;
@@ -477,13 +512,36 @@
       if (sseConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
         return;
       }
+      if (inFlightActions > 0 || isPollingState) {
+        return;
+      }
+      isPollingState = true;
       try {
-        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
-        if (res.ok) {
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`, {
+          cache: 'no-store'
+        });
+        if (res.ok && inFlightActions === 0) {
           const json = await res.json();
           if (json.ok && json.state) {
             connDot.classList.remove('offline');
-            applyRoomState(json.state);
+            const serverRev = Number(json.state.revision || 0);
+            const localRev = Number(roomState?.revision || 0);
+            if (roomState && serverRev < localRev) {
+              // Instance của Vercel bị cũ (cold/multi-instance) -> Đẩy ngay snapshot mới nhất từ Client lên để tự hồi phục
+              await fetch(`/api/action?room=${encodeURIComponent(currentRoomId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  roomId: currentRoomId,
+                  action: 'SYNC_SNAPSHOT',
+                  role: clientRole,
+                  team: clientTeam,
+                  clientSnapshot: roomState
+                })
+              }).catch(() => { });
+            } else {
+              applyRoomState(json.state);
+            }
           }
         }
       } catch (e) {
@@ -495,8 +553,10 @@
             localBroadcast?.postMessage({ type: 'STATE_UPDATE', state: s });
           }
         }
+      } finally {
+        isPollingState = false;
       }
-    }, 1000);
+    }, 600);
   }
 
   // ==================== SẢNH TRẬN ĐẤU (MAIN MENU) ====================
@@ -527,6 +587,14 @@
 
     currentRoomId = cleanId;
     swapSource = null;
+    roomState = null;
+    lastStepIndex = -1;
+    lastHoveredChar = null;
+    lastTimeLeft = -1;
+    lastCharacterGridSignature = '';
+    Object.keys(domRenderCache).forEach((k) => {
+      domRenderCache[k] = '';
+    });
 
     const fbQuery = firebaseDbUrl ? `&fb=${encodeURIComponent(firebaseDbUrl)}` : '';
     const newUrl = `${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}&role=${clientRole}${clientRole === 'PLAYER' ? `&team=${clientTeam}` : ''
@@ -1332,7 +1400,40 @@
     }
   }
 
-  function applyRoomState(newState) {
+  function applyRoomState(newState, options = {}) {
+    if (!newState) return;
+
+    // Chống hiện tượng nhảy lùi giai đoạn / vị trí do request cũ về muộn hoặc multi-instance trên Vercel
+    if (
+      roomState &&
+      !options.forceAccept &&
+      newState.roomId === roomState.roomId &&
+      typeof newState.revision === 'number' &&
+      typeof roomState.revision === 'number' &&
+      newState.revision < roomState.revision
+    ) {
+      return;
+    }
+
+    // Nếu trạng thái mới y hệt trạng thái hiện tại trên màn hình thì chỉ đồng bộ đồng hồ nhẹ nhàng, không vẽ lại DOM
+    if (
+      roomState &&
+      !options.forceAccept &&
+      newState.roomId === roomState.roomId &&
+      newState.revision === roomState.revision &&
+      newState.status === roomState.status &&
+      newState.stepIndex === roomState.stepIndex &&
+      newState.hoveredCharId === roomState.hoveredCharId &&
+      newState.isPaused === roomState.isPaused
+    ) {
+      if (typeof newState.timeLeft === 'number' && Math.abs(newState.timeLeft - roomState.timeLeft) >= 2) {
+        roomState.timeLeft = newState.timeLeft;
+        lastTimeLeft = newState.timeLeft;
+        renderHeaderAndClock();
+      }
+      return;
+    }
+
     let lockedEffectArgs = null;
     let hoverEffectColor = null;
     let shouldPulseTimer = false;
@@ -1659,7 +1760,10 @@
       ])
       .join('');
 
-    bar.innerHTML = html;
+    if (domRenderCache.seqBar !== html) {
+      domRenderCache.seqBar = html;
+      bar.innerHTML = html;
+    }
   }
 
   function renderBanSlots(teamKey, container) {
@@ -1667,7 +1771,7 @@
     const bans = roomState.teams[teamKey].bans || [];
     const cur = roomState.currentStep;
 
-    container.innerHTML = bans
+    const html = bans
       .map((banItem, idx) => {
         const isCurrentBanSlot =
           roomState.status === 'DRAFTING' &&
@@ -1711,6 +1815,12 @@
         </div>`;
       })
       .join('');
+
+    const cacheKey = teamKey === 'A' ? 'banA' : 'banB';
+    if (domRenderCache[cacheKey] !== html) {
+      domRenderCache[cacheKey] = html;
+      container.innerHTML = html;
+    }
   }
 
   function renderTeamPicks(teamKey) {
@@ -1833,8 +1943,19 @@
       `;
     };
 
-    upperContainer.innerHTML = picks.slice(0, 4).map((p, i) => buildSlotHtml(p, i)).join('');
-    lowerContainer.innerHTML = picks.slice(4, 8).map((p, i) => buildSlotHtml(p, i + 4)).join('');
+    const upperHtml = picks.slice(0, 4).map((p, i) => buildSlotHtml(p, i)).join('');
+    const lowerHtml = picks.slice(4, 8).map((p, i) => buildSlotHtml(p, i + 4)).join('');
+    const upperKey = teamKey === 'A' ? 'upperA' : 'upperB';
+    const lowerKey = teamKey === 'A' ? 'lowerA' : 'lowerB';
+
+    if (domRenderCache[upperKey] === upperHtml && domRenderCache[lowerKey] === lowerHtml) {
+      return;
+    }
+    domRenderCache[upperKey] = upperHtml;
+    domRenderCache[lowerKey] = lowerHtml;
+
+    upperContainer.innerHTML = upperHtml;
+    lowerContainer.innerHTML = lowerHtml;
 
     [upperContainer, lowerContainer].forEach((container) => {
       container.querySelectorAll('.pick-slot-card').forEach((card) => {
@@ -1971,6 +2092,34 @@
         if (p && p.charId) pickedMap.set(p.charId, tKey);
       });
     });
+
+    // Chữ ký nội dung lưới nhân vật (không bao gồm hoveredCharId để khi click chọn chỉ đổi class cực nhanh mà không dựng lại 100+ thẻ DOM)
+    const gridSignature = [
+      allChars.length,
+      selectedElement,
+      selectedWeaponType,
+      selectedRarity,
+      normQuery,
+      Array.from(bannedMap.entries()).map(([k, v]) => `${k}:${v}`).join(','),
+      Array.from(pickedMap.entries()).map(([k, v]) => `${k}:${v}`).join(',')
+    ].join('|');
+
+    if (gridSignature === lastCharacterGridSignature && grid.children.length > 0) {
+      const targetHover = roomState.hoveredCharId;
+      grid.querySelectorAll('.char-card.char-hovered').forEach((el) => {
+        if (el.getAttribute('data-char-id') !== targetHover) {
+          el.classList.remove('char-hovered');
+        }
+      });
+      if (targetHover) {
+        const activeCard = grid.querySelector(`.char-card[data-char-id="${targetHover}"]`);
+        if (activeCard && !activeCard.classList.contains('char-hovered')) {
+          activeCard.classList.add('char-hovered');
+        }
+      }
+      return;
+    }
+    lastCharacterGridSignature = gridSignature;
 
     const filtered = allChars.filter((c) => {
       if (selectedElement !== 'ALL' && c.element !== selectedElement) return false;
