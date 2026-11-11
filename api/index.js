@@ -49,6 +49,19 @@ module.exports = (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase();
 
+  // Trên Vercel Serverless không giữ kết nối SSE lâu dài để tránh treo function -> trả về 1 gói dữ liệu rồi đóng để client dùng polling 1s mượt mà
+  if (parsedUrl.pathname === '/api/events' && req.method === 'GET') {
+    const room = getRoom(roomId);
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    const initPayload = JSON.stringify({
+      type: 'STATE_UPDATE',
+      state: DraftEngine.getSerializedState(room)
+    });
+    res.status(200).end(`data: ${initPayload}\n\n`);
+    return;
+  }
+
   if (parsedUrl.pathname === '/api/rooms' && req.method === 'GET') {
     const list = Array.from(rooms.values()).map((r) => ({
       roomId: r.roomId,
@@ -79,14 +92,25 @@ module.exports = (req, res) => {
   }
 
   if (req.method === 'POST') {
-    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
-    const targetRoom = getRoom(body.roomId || roomId);
-    const result = DraftEngine.applyAction(targetRoom, body);
-    targetRoom.lastTickAt = Date.now();
-    res.status(result.ok ? 200 : 400).json({
-      ...result,
-      state: DraftEngine.getSerializedState(targetRoom)
-    });
+    try {
+      let body = req.body;
+      if (typeof body === 'string') {
+        body = JSON.parse(body || '{}');
+      } else if (Buffer.isBuffer(body)) {
+        body = JSON.parse(body.toString('utf8') || '{}');
+      } else if (!body || typeof body !== 'object') {
+        body = {};
+      }
+      const targetRoom = getRoom(body.roomId || roomId);
+      const result = DraftEngine.applyAction(targetRoom, body);
+      targetRoom.lastTickAt = Date.now();
+      res.status(result.ok ? 200 : 400).json({
+        ...result,
+        state: DraftEngine.getSerializedState(targetRoom)
+      });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: 'Dữ liệu gửi lên không hợp lệ.' });
+    }
     return;
   }
 

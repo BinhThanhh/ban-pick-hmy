@@ -429,42 +429,49 @@
     }
 
     syncTag.textContent = 'LIVE';
+    const isLocalHost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.startsWith('192.168.') ||
+      window.location.hostname.startsWith('10.');
     let sseConnected = false;
 
-    try {
-      sseConnection = new EventSource(`/api/events?room=${encodeURIComponent(currentRoomId)}`);
-      sseConnection.onopen = () => {
-        sseConnected = true;
-        connDot.classList.remove('offline');
-      };
-      sseConnection.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'STATE_UPDATE' && msg.state) {
-            applyRoomState(msg.state);
-          }
-        } catch (e) { }
-      };
-      sseConnection.onerror = () => {
-        sseConnected = false;
-      };
-    } catch (e) { }
+    if (isLocalHost) {
+      try {
+        sseConnection = new EventSource(`/api/events?room=${encodeURIComponent(currentRoomId)}`);
+        sseConnection.onopen = () => {
+          sseConnected = true;
+          connDot.classList.remove('offline');
+        };
+        sseConnection.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'STATE_UPDATE' && msg.state) {
+              applyRoomState(msg.state);
+            }
+          } catch (e) { }
+        };
+        sseConnection.onerror = () => {
+          sseConnected = false;
+        };
+      } catch (e) { }
 
-    try {
-      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      wsConnection = new WebSocket(`${proto}//${window.location.host}/ws?room=${encodeURIComponent(currentRoomId)}`);
-      wsConnection.onopen = () => {
-        connDot.classList.remove('offline');
-      };
-      wsConnection.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === 'STATE_UPDATE' && msg.state) {
-            applyRoomState(msg.state);
-          }
-        } catch (e) { }
-      };
-    } catch (e) { }
+      try {
+        const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsConnection = new WebSocket(`${proto}//${window.location.host}/ws?room=${encodeURIComponent(currentRoomId)}`);
+        wsConnection.onopen = () => {
+          connDot.classList.remove('offline');
+        };
+        wsConnection.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'STATE_UPDATE' && msg.state) {
+              applyRoomState(msg.state);
+            }
+          } catch (e) { }
+        };
+      } catch (e) { }
+    }
 
     vercelPollTimer = setInterval(async () => {
       if (sseConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {

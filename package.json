@@ -2,9 +2,8 @@
   "name": "hoyoverse-ban-pick",
   "version": "1.0.0",
   "description": "Web Ban Pick các tựa game HoYoverse (Genshin Impact - Cấm 5 Chọn 8 Realtime)",
-  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node dev-server.js",
+    "dev": "node dev-server.js"
   }
 }

@@ -39,6 +39,6 @@ npx firebase-tools deploy --only hosting
 
 ### Cách C: Chạy trực tiếp trên máy / mạng LAN
 ```bash
-node server.js
+npm start
 ```
 Mở `http://localhost:3000` trên trình duyệt.
