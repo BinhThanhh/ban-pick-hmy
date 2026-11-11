@@ -97,12 +97,7 @@ window.MIHOYO_DATA = (function () {
     { id: 'diluc', name: 'Diluc', nameVi: 'Diluc', element: 'Pyro', weaponType: 'Claymore', rarity: 5, icon: 'UI_AvatarIcon_Diluc' },
     { id: 'jean', name: 'Jean', nameVi: 'Jean', element: 'Anemo', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_Qin' },
     { id: 'aloy', name: 'Aloy', nameVi: 'Aloy', element: 'Cryo', weaponType: 'Bow', rarity: 5, icon: 'UI_AvatarIcon_Aloy' },
-    { id: 'traveler_pyro', name: 'Traveler (Pyro)', nameVi: 'Nhà Lữ Hành (Hỏa)', element: 'Pyro', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerGirl' },
-    { id: 'traveler_dendro', name: 'Traveler (Dendro)', nameVi: 'Nhà Lữ Hành (Thảo)', element: 'Dendro', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerBoy' },
-    { id: 'traveler_hydro', name: 'Traveler (Hydro)', nameVi: 'Nhà Lữ Hành (Thủy)', element: 'Hydro', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerGirl' },
-    { id: 'traveler_electro', name: 'Traveler (Electro)', nameVi: 'Nhà Lữ Hành (Lôi)', element: 'Electro', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerBoy' },
-    { id: 'traveler_geo', name: 'Traveler (Geo)', nameVi: 'Nhà Lữ Hành (Nham)', element: 'Geo', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerGirl' },
-    { id: 'traveler_anemo', name: 'Traveler (Anemo)', nameVi: 'Nhà Lữ Hành (Phong)', element: 'Anemo', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerBoy' },
+    { id: 'traveler', name: 'Traveler', nameVi: 'Nhà Lữ Hành', element: 'Multi', weaponType: 'Sword', rarity: 5, icon: 'UI_AvatarIcon_PlayerGirl' },
 
     // === 4 SAO ===
     { id: 'lanyan', name: 'Lan Yan', nameVi: 'Lan Yan', element: 'Anemo', weaponType: 'Catalyst', rarity: 4, icon: 'UI_AvatarIcon_Lanyan' },
@@ -307,8 +302,26 @@ window.MIHOYO_DATA = (function () {
 
         Object.values(items).forEach((item) => {
           if (!item || !item.icon || !item.name) return;
-          // Bỏ qua Manekin hoặc test entry
-          if (String(item.id).startsWith('10000005') || String(item.id).startsWith('10000007')) {
+          const idStr = String(item.id || '');
+          const iconLower = String(item.icon || '').toLowerCase();
+          const routeLower = String(item.route || '').toLowerCase();
+          const nameNorm = normalizeSearchText(item.name);
+
+          // Loại bỏ hoàn toàn Người Mẫu (Manekin / Manekina) và các biến thể Nhà Lữ Hành theo nguyên tố (chỉ giữ 1 Nhà Lữ Hành duy nhất)
+          if (
+            idStr.startsWith('10000005') ||
+            idStr.startsWith('10000007') ||
+            idStr.startsWith('10000117') ||
+            idStr.startsWith('10000118') ||
+            iconLower.includes('playerboy') ||
+            iconLower.includes('playergirl') ||
+            iconLower.includes('manekin') ||
+            routeLower.includes('traveler') ||
+            routeLower.includes('manekin') ||
+            nameNorm.includes('nguoi mau') ||
+            nameNorm.includes('manekin') ||
+            nameNorm.includes('nha lu hanh')
+          ) {
             return;
           }
           const element = ELEMENT_MAP[item.element] || 'Pyro';
@@ -392,6 +405,10 @@ window.MIHOYO_DATA = (function () {
   }
 
   function getCharacterById(id) {
+    if (!id) return null;
+    if (String(id).startsWith('traveler')) {
+      return charactersList.find((c) => c.id === 'traveler') || null;
+    }
     return charactersList.find((c) => c.id === id) || null;
   }
 

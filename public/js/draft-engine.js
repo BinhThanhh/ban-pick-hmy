@@ -115,12 +115,7 @@
     { id: 'diluc', name: 'Diluc' },
     { id: 'jean', name: 'Jean' },
     { id: 'aloy', name: 'Aloy' },
-    { id: 'traveler_pyro', name: 'Nhà Lữ Hành (Hỏa)' },
-    { id: 'traveler_dendro', name: 'Nhà Lữ Hành (Thảo)' },
-    { id: 'traveler_hydro', name: 'Nhà Lữ Hành (Thủy)' },
-    { id: 'traveler_electro', name: 'Nhà Lữ Hành (Lôi)' },
-    { id: 'traveler_geo', name: 'Nhà Lữ Hành (Nham)' },
-    { id: 'traveler_anemo', name: 'Nhà Lữ Hành (Phong)' },
+    { id: 'traveler', name: 'Nhà Lữ Hành' },
     { id: 'lanyan', name: 'Lan Yan' },
     { id: 'ororon', name: 'Ororon' },
     { id: 'kachina', name: 'Kachina' },
@@ -326,12 +321,22 @@
     if (room.actionLog.length > 50) room.actionLog.length = 50;
   }
 
+  function isSameCharacterGroup(idA, idB) {
+    if (!idA || !idB) return false;
+    if (idA === idB) return true;
+    // Nhà Lữ Hành tính chung là 1 nhân vật duy nhất bất kể nguyên tố
+    if (String(idA).startsWith('traveler') && String(idB).startsWith('traveler')) {
+      return true;
+    }
+    return false;
+  }
+
   function isCharacterTaken(room, charId) {
     if (!charId || charId === 'SKIPPED_BAN') return false;
     for (const teamKey of ['A', 'B']) {
       const t = room.teams[teamKey];
-      if ((t.bans || []).some((b) => b && b.charId === charId)) return true;
-      if ((t.picks || []).some((p) => p && p.charId === charId)) return true;
+      if ((t.bans || []).some((b) => b && isSameCharacterGroup(b.charId, charId))) return true;
+      if ((t.picks || []).some((p) => p && isSameCharacterGroup(p.charId, charId))) return true;
     }
     return false;
   }

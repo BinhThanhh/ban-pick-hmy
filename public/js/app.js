@@ -80,7 +80,8 @@
     Electro: `<img src="/sprites/element-icons/UI_Buff_Element_Elect.png" class="char-el-img" alt="Electro" />`,
     Dendro: `<img src="/sprites/element-icons/UI_Buff_Element_Grass.png" class="char-el-img" alt="Dendro" />`,
     Cryo: `<img src="/sprites/element-icons/UI_Buff_Element_Frost.png" class="char-el-img" alt="Cryo" />`,
-    Geo: `<img src="/sprites/element-icons/UI_Buff_Element_Roach.png" class="char-el-img" alt="Geo" />`
+    Geo: `<img src="/sprites/element-icons/UI_Buff_Element_Roach.png" class="char-el-img" alt="Geo" />`,
+    Multi: `<svg class="char-el-img" viewBox="0 0 24 24" fill="#f0e6d2"><path d="M12 2L14.6 9.4L22 12L14.6 14.6L12 22L9.4 14.6L2 12L9.4 9.4L12 2Z"/></svg>`
   };
 
   const ELEMENT_COLORS = {
@@ -90,7 +91,8 @@
     Electro: '#c074ff',
     Dendro: '#8be04e',
     Cryo: '#7ce8ff',
-    Geo: '#f5b942'
+    Geo: '#f5b942',
+    Multi: '#f0e6d2'
   };
 
   // ==================== BỘ PHÁT NHẠC (/sprites/musics) & HIỆU ỨNG ÂM THANH (/sprites/sfx) ====================
@@ -1566,7 +1568,8 @@
           const elSprite = ELEMENT_SPRITE_URLS[charObj.element]
             ? `<img src="${ELEMENT_SPRITE_URLS[charObj.element]}" class="showcase-el-img" alt="${charObj.element}" />`
             : '';
-          showcaseSub.innerHTML = `${elSprite}<span>${charObj.element.toUpperCase()} • ${charObj.rarity} SAO</span>`;
+          const elLabel = charObj.element === 'Multi' ? 'TỰ DO NGUYÊN TỐ' : charObj.element.toUpperCase();
+          showcaseSub.innerHTML = `${elSprite}<span>${elLabel} • ${charObj.rarity} SAO</span>`;
         }
         return;
       }
@@ -2086,10 +2089,16 @@
 
     ['A', 'B'].forEach((tKey) => {
       (roomState.teams[tKey].bans || []).forEach((b) => {
-        if (b && b.charId && b.charId !== 'SKIPPED_BAN') bannedMap.set(b.charId, tKey);
+        if (b && b.charId && b.charId !== 'SKIPPED_BAN') {
+          const normId = String(b.charId).startsWith('traveler') ? 'traveler' : b.charId;
+          bannedMap.set(normId, tKey);
+        }
       });
       (roomState.teams[tKey].picks || []).forEach((p) => {
-        if (p && p.charId) pickedMap.set(p.charId, tKey);
+        if (p && p.charId) {
+          const normId = String(p.charId).startsWith('traveler') ? 'traveler' : p.charId;
+          pickedMap.set(normId, tKey);
+        }
       });
     });
 
@@ -2122,7 +2131,8 @@
     lastCharacterGridSignature = gridSignature;
 
     const filtered = allChars.filter((c) => {
-      if (selectedElement !== 'ALL' && c.element !== selectedElement) return false;
+      // Nhà Lữ Hành dùng tự do mọi nguyên tố nên luôn xuất hiện khi lọc theo bất kỳ nguyên tố nào
+      if (selectedElement !== 'ALL' && c.element !== 'Multi' && c.element !== selectedElement) return false;
       if (selectedWeaponType !== 'ALL' && c.weaponType !== selectedWeaponType) return false;
       if (selectedRarity !== 'ALL' && String(c.rarity) !== String(selectedRarity)) return false;
       if (normQuery) {
