@@ -177,11 +177,27 @@
     return available[randIdx];
   }
 
+  function hashRoomPassword(rawPassword) {
+    const clean = String(rawPassword || '').trim();
+    if (!clean) return '';
+    let h1 = 0xdeadbeef ^ clean.length;
+    let h2 = 0x41c6ce57 ^ clean.length;
+    for (let i = 0; i < clean.length; i++) {
+      const ch = clean.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return 'ph_' + (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+  }
+
   function createInitialRoomState(roomId = 'MAIN') {
     return {
       roomId,
       revision: 0,
       updatedAt: Date.now(),
+      passwordHash: '',
       game: 'genshin',
       status: 'WAITING', // 'WAITING' | 'DRAFTING' | 'LINEUP' | 'COMPLETED'
       isPaused: false,
@@ -256,6 +272,7 @@
       roomId: raw.roomId || roomId,
       revision: typeof raw.revision === 'number' ? raw.revision : 0,
       updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : Date.now(),
+      passwordHash: typeof raw.passwordHash === 'string' ? raw.passwordHash : '',
       game: raw.game || 'genshin',
       status: raw.status || 'WAITING',
       isPaused: Boolean(raw.isPaused),
@@ -454,6 +471,7 @@
     const norm = normalizeRoomState(room, room.roomId);
     return {
       ...norm,
+      hasPassword: Boolean(norm.passwordHash),
       totalSteps: DRAFT_STEPS.length,
       currentStep: getCurrentStep(norm),
       steps: DRAFT_STEPS,
@@ -471,7 +489,15 @@
   }
 
   function applyActionInternal(room, body) {
-    const { action, role, team, payload = {} } = body;
+    const { action, role, team, authToken, payload = {} } = body;
+
+    if (room.passwordHash && authToken !== room.passwordHash) {
+      return {
+        ok: false,
+        authRequired: true,
+        error: 'Phòng đấu này đang khóa mật khẩu! Vui lòng nhập đúng mật khẩu phòng.'
+      };
+    }
 
     switch (action) {
       case 'START_MATCH': {
@@ -522,10 +548,12 @@
         const banDur = room.banDuration;
         const pickDur = room.pickDuration;
         const lineupDur = room.lineupDuration;
+        const savedPassHash = room.passwordHash || '';
 
         const nextRev = (typeof room.revision === 'number' ? room.revision : 0) + 1;
         const fresh = createInitialRoomState(room.roomId);
         fresh.revision = nextRev;
+        fresh.passwordHash = savedPassHash;
         fresh.teams.A.name = nameA;
         fresh.teams.B.name = nameB;
         fresh.banDuration = banDur;
@@ -762,6 +790,9 @@
         if (payload.lineupDuration) {
           room.lineupDuration = Math.max(15, Math.min(600, Number(payload.lineupDuration) || 90));
         }
+        if (payload.passwordHash !== undefined) {
+          room.passwordHash = String(payload.passwordHash || '');
+        }
         addLog(room, `BTC đã cập nhật thông tin trận đấu: ${room.teams.A.name} vs ${room.teams.B.name}.`);
         return { ok: true };
       }
@@ -784,6 +815,7 @@
 
   return {
     DRAFT_STEPS,
+    hashRoomPassword,
     createInitialRoomState,
     normalizeRoomState,
     getSerializedState,

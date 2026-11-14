@@ -20,6 +20,46 @@
     localStorage.setItem('hoyo_fb_url', firebaseDbUrl);
   }
 
+  const urlPassToken = (urlParams.get('pt') || '').trim();
+  const sessionDeletedRooms = new Set();
+  let pendingUnlockContext = null;
+  let isCurrentRoomDeleted = false;
+  let clearPasswordRequested = false;
+
+  function getSavedRoomTokens() {
+    try {
+      const raw = localStorage.getItem('hoyo_room_tokens');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function getRoomAuthToken(roomId = currentRoomId) {
+    const cleanId = String(roomId || '').toUpperCase().trim();
+    if (!cleanId) return '';
+    const map = getSavedRoomTokens();
+    return map[cleanId] || '';
+  }
+
+  function saveRoomAuthToken(roomId, token) {
+    const cleanId = String(roomId || '').toUpperCase().trim();
+    if (!cleanId) return;
+    try {
+      const map = getSavedRoomTokens();
+      if (token) {
+        map[cleanId] = String(token);
+      } else {
+        delete map[cleanId];
+      }
+      localStorage.setItem('hoyo_room_tokens', JSON.stringify(map));
+    } catch (e) { }
+  }
+
+  if (urlPassToken) {
+    saveRoomAuthToken(currentRoomId, urlPassToken);
+  }
+
   let searchQuery = '';
   let selectedElement = 'ALL';
   let selectedWeaponType = 'ALL';
@@ -190,6 +230,7 @@
 
   function saveRecentRoomLocal(roomObj) {
     if (!roomObj || !roomObj.roomId) return;
+    if (sessionDeletedRooms.has(roomObj.roomId)) return;
     try {
       const raw = localStorage.getItem('hoyo_recent_rooms');
       const list = raw ? JSON.parse(raw) : [];
@@ -198,6 +239,7 @@
         roomId: roomObj.roomId,
         teamAName: roomObj.teams?.A?.name || 'ĐỘI XANH',
         teamBName: roomObj.teams?.B?.name || 'ĐỘI ĐỎ',
+        hasPassword: Boolean(roomObj.hasPassword || roomObj.passwordHash),
         status: roomObj.status || 'WAITING',
         stepIndex: roomObj.stepIndex || 0,
         totalSteps: roomObj.totalSteps || 26,
@@ -207,10 +249,23 @@
     } catch (e) { }
   }
 
+  function removeRecentRoomLocal(targetRoomId) {
+    const cleanId = String(targetRoomId || '').toUpperCase().trim();
+    if (!cleanId) return;
+    try {
+      const raw = localStorage.getItem('hoyo_recent_rooms');
+      if (!raw) return;
+      const list = JSON.parse(raw);
+      const filtered = list.filter((r) => String(r.roomId || '').toUpperCase() !== cleanId);
+      localStorage.setItem('hoyo_recent_rooms', JSON.stringify(filtered));
+    } catch (e) { }
+  }
+
   function getRecentRoomsLocal() {
     try {
       const raw = localStorage.getItem('hoyo_recent_rooms');
-      return raw ? JSON.parse(raw) : [];
+      const list = raw ? JSON.parse(raw) : [];
+      return list.filter((r) => r && r.roomId && !sessionDeletedRooms.has(r.roomId));
     } catch (e) {
       return [];
     }
@@ -291,18 +346,295 @@
     } catch (e) { }
   }
 
-  async function sendAction(action, payload = {}) {
+  function stopRealtimeConnections() {
+    if (sseConnection) {
+      sseConnection.close();
+      sseConnection = null;
+    }
+    if (wsConnection) {
+      wsConnection.close();
+      wsConnection = null;
+    }
+    if (vercelPollTimer) {
+      clearInterval(vercelPollTimer);
+      vercelPollTimer = null;
+    }
+    if (localTickTimer) {
+      clearInterval(localTickTimer);
+      localTickTimer = null;
+    }
+  }
+
+  function openRoomPasswordModal({ roomId, teamAName, teamBName, onUnlocked } = {}) {
+    const targetId = String(roomId || currentRoomId || 'MAIN').toUpperCase();
+    stopRealtimeConnections();
+    finishLoadingOverlay();
+
+    pendingUnlockContext = {
+      roomId: targetId,
+      onUnlocked: typeof onUnlocked === 'function' ? onUnlocked : null
+    };
+
+    const idLabel = document.getElementById('unlockRoomIdLabel');
+    const teamsLabel = document.getElementById('unlockRoomTeamsLabel');
+    const passInput = document.getElementById('inputUnlockPassword');
+    const errText = document.getElementById('unlockErrorText');
+    const btnCancel = document.getElementById('btnCancelUnlockRoom');
+    const modal = document.getElementById('roomPasswordModal');
+
+    if (idLabel) idLabel.textContent = targetId;
+    if (teamsLabel) {
+      teamsLabel.textContent =
+        teamAName && teamBName
+          ? `${teamAName} vs ${teamBName} • Nhập mật khẩu để truy cập`
+          : 'Vui lòng nhập mật khẩu để vào phòng đấu';
+    }
+    if (passInput) passInput.value = '';
+    if (errText) errText.classList.add('hidden');
+    if (btnCancel) btnCancel.classList.toggle('hidden', clientRole !== 'SPEC');
+    if (modal) modal.classList.remove('hidden');
+
+    setTimeout(() => {
+      passInput?.focus();
+    }, 50);
+  }
+
+  function closeRoomPasswordModal() {
+    const modal = document.getElementById('roomPasswordModal');
+    if (modal) modal.classList.add('hidden');
+    pendingUnlockContext = null;
+  }
+
+  async function submitUnlockRoomPassword() {
+    const passInput = document.getElementById('inputUnlockPassword');
+    const errText = document.getElementById('unlockErrorText');
+    const rawPwd = (passInput?.value || '').trim();
+    const targetId = pendingUnlockContext?.roomId || currentRoomId;
+    const onUnlockedCb = pendingUnlockContext?.onUnlocked || null;
+
+    if (!rawPwd) {
+      if (errText) {
+        errText.textContent = 'Vui lòng nhập mật khẩu phòng!';
+        errText.classList.remove('hidden');
+      }
+      return;
+    }
+
+    const candidateHash = window.DRAFT_ENGINE ? window.DRAFT_ENGINE.hashRoomPassword(rawPwd) : '';
+
+    if (firebaseDbUrl && window.DRAFT_ENGINE) {
+      try {
+        const endpoint = getFirebaseRoomEndpoint(targetId);
+        const r = await fetch(endpoint);
+        const data = await r.json();
+        if (!data) {
+          closeRoomPasswordModal();
+          handleRoomDeletedEvent(targetId, false);
+          return;
+        }
+        if (!data.passwordHash || data.passwordHash === candidateHash) {
+          saveRoomAuthToken(targetId, data.passwordHash || candidateHash);
+          closeRoomPasswordModal();
+          closeMainMenu();
+          currentRoomId = targetId;
+          isCurrentRoomDeleted = false;
+          document.getElementById('btnCloseMainMenu')?.classList.remove('hidden');
+          rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, targetId);
+          connectRealtime();
+          const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
+          applyRoomState(serialized, { forceAccept: true });
+          if (onUnlockedCb) onUnlockedCb(serialized);
+          showToast(`Đã mở khóa phòng [${targetId}]`);
+        } else if (errText) {
+          errText.textContent = 'Mật khẩu phòng không chính xác!';
+          errText.classList.remove('hidden');
+        }
+      } catch (e) {
+        if (errText) {
+          errText.textContent = 'Lỗi kết nối khi kiểm tra mật khẩu.';
+          errText.classList.remove('hidden');
+        }
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/action?room=${encodeURIComponent(targetId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          roomId: targetId,
+          action: 'VERIFY_PASSWORD',
+          password: rawPwd,
+          authToken: candidateHash
+        })
+      });
+      const json = await res.json();
+      if (json.deleted) {
+        closeRoomPasswordModal();
+        handleRoomDeletedEvent(targetId, false);
+        return;
+      }
+      if (json.ok) {
+        saveRoomAuthToken(targetId, json.authToken || candidateHash);
+        closeRoomPasswordModal();
+        closeMainMenu();
+        currentRoomId = targetId;
+        isCurrentRoomDeleted = false;
+        document.getElementById('btnCloseMainMenu')?.classList.remove('hidden');
+        if (json.state && window.DRAFT_ENGINE) {
+          rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(json.state, targetId);
+        }
+        connectRealtime();
+        if (json.state) {
+          applyRoomState(json.state, { forceAccept: true });
+        }
+        if (onUnlockedCb) onUnlockedCb(json.state);
+        showToast(`Đã mở khóa phòng [${targetId}]`);
+      } else if (errText) {
+        errText.textContent = json.error || 'Mật khẩu phòng không chính xác!';
+        errText.classList.remove('hidden');
+      }
+    } catch (e) {
+      if (errText) {
+        errText.textContent = 'Không thể kết nối máy chủ để xác thực.';
+        errText.classList.remove('hidden');
+      }
+    }
+  }
+
+  function handleRoomDeletedEvent(deletedRoomId, triggeredBySelf = false) {
+    const cleanDelId = String(deletedRoomId || currentRoomId || '').toUpperCase().trim();
+    if (cleanDelId) {
+      sessionDeletedRooms.add(cleanDelId);
+      removeRecentRoomLocal(cleanDelId);
+      saveRoomAuthToken(cleanDelId, '');
+    }
+
+    stopRealtimeConnections();
+    stopDiscordScreenShare('A', true);
+    stopDiscordScreenShare('B', true);
+    autoPauseAndMuteBgm();
+
+    document.getElementById('settingsModal')?.classList.add('hidden');
+    document.getElementById('charMetaModal')?.classList.add('hidden');
+    closeRoomPasswordModal();
+
+    isCurrentRoomDeleted = true;
+    swapSource = null;
+    roomState = null;
+    rawRoomMemory = null;
+
+    document.getElementById('btnEndMatchToolbar')?.classList.add('hidden');
+    document.getElementById('btnEndMatchStream')?.classList.add('hidden');
+    document.getElementById('roomLockIndicator')?.classList.add('hidden');
+
+    if (clientRole === 'SPEC') {
+      document.getElementById('btnCloseMainMenu')?.classList.add('hidden');
+      const newIdInput = document.getElementById('menuNewRoomId');
+      if (newIdInput) newIdInput.value = generateRandomMatchId();
+
+      const fbQuery = firebaseDbUrl ? `&fb=${encodeURIComponent(firebaseDbUrl)}` : '';
+      window.history.pushState({}, '', `${window.location.pathname}?role=SPEC${fbQuery}`);
+
+      openMainMenu();
+      showToast(
+        triggeredBySelf
+          ? `Đã kết thúc và xóa phòng đấu [${cleanDelId}].`
+          : `Trận đấu [${cleanDelId}] đã kết thúc và phòng đã bị xóa.`
+      );
+    } else {
+      document.getElementById('dualStreamStage')?.classList.add('hidden');
+      document.getElementById('lockinBar')?.classList.add('hidden');
+      document.getElementById('btnConfirmTeamLineup')?.classList.add('hidden');
+      const timerDisp = document.getElementById('timerDisplay');
+      const turnInst = document.getElementById('turnInstruction');
+      if (timerDisp) timerDisp.textContent = 'END';
+      if (turnInst) turnInst.textContent = `TRẬN ĐẤU [${cleanDelId}] ĐÃ KẾT THÚC & PHÒNG ĐÃ ĐÓNG`;
+      showToast(`Trận đấu [${cleanDelId}] đã kết thúc và bị xóa.`);
+    }
+  }
+
+  async function endAndDeleteCurrentMatch() {
+    if (clientRole !== 'SPEC') return;
+    const targetId = currentRoomId;
+    if (!targetId || isCurrentRoomDeleted) return;
+
+    if (!confirm(`Kết thúc trận đấu và xóa vĩnh viễn phòng [${targetId}]?\nPhòng này sẽ bị xóa khỏi danh sách phòng đấu.`)) {
+      return;
+    }
+
+    const authToken = getRoomAuthToken(targetId);
+    stopRealtimeConnections();
+    await stopDiscordScreenShare('A', true);
+    await stopDiscordScreenShare('B', true);
+    autoPauseAndMuteBgm();
+
+    if (firebaseDbUrl) {
+      const endpoint = getFirebaseRoomEndpoint(targetId);
+      if (endpoint) {
+        try {
+          await fetch(endpoint, { method: 'DELETE' });
+        } catch (e) { }
+      }
+    } else {
+      try {
+        const res = await fetch(`/api/action?room=${encodeURIComponent(targetId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            roomId: targetId,
+            action: 'DELETE_ROOM',
+            role: clientRole,
+            authToken
+          })
+        });
+        const json = await res.json();
+        if (!json.ok && json.authRequired) {
+          openRoomPasswordModal({
+            roomId: targetId,
+            teamAName: roomState?.teams?.A?.name,
+            teamBName: roomState?.teams?.B?.name,
+            onUnlocked: () => endAndDeleteCurrentMatch()
+          });
+          return;
+        }
+        if (!json.ok && json.error) {
+          showToast(json.error);
+          connectRealtime();
+          return;
+        }
+      } catch (e) { }
+    }
+
+    localBroadcast?.postMessage({ type: 'ROOM_DELETED', roomId: targetId });
+    handleRoomDeletedEvent(targetId, true);
+  }
+
+  async function sendAction(action, payload = {}, extraOptions = {}) {
+    if (isCurrentRoomDeleted && !extraOptions.isCreateRoom) {
+      showToast('Phòng đấu này đã kết thúc và bị xóa.');
+      return { ok: false, deleted: true };
+    }
+
     const baseSnapshot = roomState
       ? JSON.parse(JSON.stringify(roomState))
       : rawRoomMemory
         ? JSON.parse(JSON.stringify(rawRoomMemory))
         : null;
 
+    const currentToken =
+      extraOptions.overrideAuthToken !== undefined
+        ? extraOptions.overrideAuthToken
+        : getRoomAuthToken(currentRoomId);
+
     const body = {
       roomId: currentRoomId,
       action,
       role: clientRole,
       team: clientTeam,
+      authToken: currentToken,
+      isCreateRoom: Boolean(extraOptions.isCreateRoom),
       payload,
       clientSnapshot: baseSnapshot
     };
@@ -312,8 +644,19 @@
       const tempRoom = window.DRAFT_ENGINE.normalizeRoomState(baseSnapshot, currentRoomId);
       const optimisticRes = window.DRAFT_ENGINE.applyAction(tempRoom, body);
       if (!optimisticRes.ok) {
+        if (optimisticRes.authRequired) {
+          openRoomPasswordModal({
+            roomId: currentRoomId,
+            teamAName: tempRoom.teams?.A?.name,
+            teamBName: tempRoom.teams?.B?.name
+          });
+          return optimisticRes;
+        }
         if (optimisticRes.error) showToast(optimisticRes.error);
         return optimisticRes;
+      }
+      if (action === 'UPDATE_SETTINGS' && payload.passwordHash !== undefined) {
+        saveRoomAuthToken(currentRoomId, payload.passwordHash);
       }
       rawRoomMemory = tempRoom;
       const optimisticSerialized = window.DRAFT_ENGINE.getSerializedState(tempRoom);
@@ -343,6 +686,18 @@
         body: JSON.stringify(body)
       });
       const data = await res.json();
+      if (data.deleted) {
+        handleRoomDeletedEvent(currentRoomId, false);
+        return data;
+      }
+      if (data.authRequired) {
+        openRoomPasswordModal({
+          roomId: currentRoomId,
+          teamAName: roomState?.teams?.A?.name,
+          teamBName: roomState?.teams?.B?.name
+        });
+        return data;
+      }
       if (!data.ok && data.error && data.error.includes('Hành động không hợp lệ') && window.DRAFT_ENGINE) {
         const serialized = window.DRAFT_ENGINE.getSerializedState(rawRoomMemory);
         return { ok: true, state: serialized };
@@ -373,7 +728,12 @@
       if (typeof BroadcastChannel !== 'undefined') {
         localBroadcast = new BroadcastChannel(`hoyo_banpick_${currentRoomId}`);
         localBroadcast.onmessage = (ev) => {
-          if (ev.data && ev.data.type === 'STATE_UPDATE' && ev.data.state) {
+          if (!ev.data) return;
+          if (ev.data.type === 'ROOM_DELETED' && (!ev.data.roomId || ev.data.roomId === currentRoomId)) {
+            handleRoomDeletedEvent(currentRoomId, false);
+            return;
+          }
+          if (ev.data.type === 'STATE_UPDATE' && ev.data.state) {
             applyRoomState(ev.data.state);
           }
         };
@@ -382,6 +742,8 @@
   }
 
   function connectRealtime() {
+    if (isCurrentRoomDeleted) return;
+
     document.getElementById('roomCodeLabel').textContent = currentRoomId;
     const menuRoomText = document.getElementById('menuCurrentRoomText');
     if (menuRoomText) menuRoomText.textContent = currentRoomId;
@@ -390,23 +752,7 @@
     const syncTag = document.getElementById('syncModeTag');
 
     setupBroadcastChannel();
-
-    if (sseConnection) {
-      sseConnection.close();
-      sseConnection = null;
-    }
-    if (wsConnection) {
-      wsConnection.close();
-      wsConnection = null;
-    }
-    if (vercelPollTimer) {
-      clearInterval(vercelPollTimer);
-      vercelPollTimer = null;
-    }
-    if (localTickTimer) {
-      clearInterval(localTickTimer);
-      localTickTimer = null;
-    }
+    stopRealtimeConnections();
 
     // Đồng hồ đếm ngược nội bộ chạy độc lập 1s/lần ngay trên trình duyệt để không bị khựng hay delay do mạng
     localTickTimer = setInterval(() => {
@@ -423,15 +769,29 @@
     if (firebaseDbUrl && window.DRAFT_ENGINE) {
       syncTag.textContent = 'FIREBASE';
       const endpoint = getFirebaseRoomEndpoint(currentRoomId);
+      let hadFirebaseData = false;
 
       fetch(endpoint)
         .then((r) => r.json())
         .then((data) => {
           connDot.classList.remove('offline');
           if (!data) {
+            if (!hasExplicitRoomParam && clientRole === 'SPEC') {
+              return;
+            }
             rawRoomMemory = window.DRAFT_ENGINE.createInitialRoomState(currentRoomId);
             pushStateToFirebase(rawRoomMemory, currentRoomId);
+            hadFirebaseData = true;
           } else {
+            hadFirebaseData = true;
+            if (data.passwordHash && getRoomAuthToken(currentRoomId) !== data.passwordHash) {
+              openRoomPasswordModal({
+                roomId: currentRoomId,
+                teamAName: data.teams?.A?.name,
+                teamBName: data.teams?.B?.name
+              });
+              return;
+            }
             rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, currentRoomId);
           }
           applyRoomState(window.DRAFT_ENGINE.getSerializedState(rawRoomMemory));
@@ -441,13 +801,28 @@
         });
 
       vercelPollTimer = setInterval(async () => {
-        if (inFlightActions > 0 || isPollingState) return;
+        if (inFlightActions > 0 || isPollingState || isCurrentRoomDeleted) return;
         isPollingState = true;
         try {
           const r = await fetch(endpoint);
           if (!r.ok) return;
           const data = await r.json();
-          if (data && inFlightActions === 0) {
+          if (!data) {
+            if (hadFirebaseData || roomState) {
+              handleRoomDeletedEvent(currentRoomId, false);
+            }
+            return;
+          }
+          hadFirebaseData = true;
+          if (data.passwordHash && getRoomAuthToken(currentRoomId) !== data.passwordHash) {
+            openRoomPasswordModal({
+              roomId: currentRoomId,
+              teamAName: data.teams?.A?.name,
+              teamBName: data.teams?.B?.name
+            });
+            return;
+          }
+          if (inFlightActions === 0) {
             rawRoomMemory = window.DRAFT_ENGINE.normalizeRoomState(data, currentRoomId);
             if (clientRole === 'SPEC') {
               const ticked = window.DRAFT_ENGINE.tickRoomTimer(rawRoomMemory);
@@ -472,10 +847,13 @@
       window.location.hostname.startsWith('192.168.') ||
       window.location.hostname.startsWith('10.');
     let sseConnected = false;
+    const passQuery = getRoomAuthToken(currentRoomId)
+      ? `&pt=${encodeURIComponent(getRoomAuthToken(currentRoomId))}`
+      : '';
 
     if (isLocalHost) {
       try {
-        sseConnection = new EventSource(`/api/events?room=${encodeURIComponent(currentRoomId)}`);
+        sseConnection = new EventSource(`/api/events?room=${encodeURIComponent(currentRoomId)}${passQuery}`);
         sseConnection.onopen = () => {
           sseConnected = true;
           connDot.classList.remove('offline');
@@ -483,6 +861,18 @@
         sseConnection.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
+            if (msg.type === 'ROOM_DELETED' || msg.deleted) {
+              handleRoomDeletedEvent(msg.roomId || currentRoomId, false);
+              return;
+            }
+            if (msg.type === 'ROOM_LOCKED' || msg.locked) {
+              openRoomPasswordModal({
+                roomId: msg.roomId || currentRoomId,
+                teamAName: msg.teamAName,
+                teamBName: msg.teamBName
+              });
+              return;
+            }
             if (msg.type === 'STATE_UPDATE' && msg.state) {
               applyRoomState(msg.state);
             }
@@ -495,13 +885,25 @@
 
       try {
         const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        wsConnection = new WebSocket(`${proto}//${window.location.host}/ws?room=${encodeURIComponent(currentRoomId)}`);
+        wsConnection = new WebSocket(`${proto}//${window.location.host}/ws?room=${encodeURIComponent(currentRoomId)}${passQuery}`);
         wsConnection.onopen = () => {
           connDot.classList.remove('offline');
         };
         wsConnection.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
+            if (msg.type === 'ROOM_DELETED' || msg.deleted) {
+              handleRoomDeletedEvent(msg.roomId || currentRoomId, false);
+              return;
+            }
+            if (msg.type === 'ROOM_LOCKED' || msg.locked) {
+              openRoomPasswordModal({
+                roomId: msg.roomId || currentRoomId,
+                teamAName: msg.teamAName,
+                teamBName: msg.teamBName
+              });
+              return;
+            }
             if (msg.type === 'STATE_UPDATE' && msg.state) {
               applyRoomState(msg.state);
             }
@@ -514,16 +916,35 @@
       if (sseConnected && wsConnection && wsConnection.readyState === WebSocket.OPEN) {
         return;
       }
-      if (inFlightActions > 0 || isPollingState) {
+      if (inFlightActions > 0 || isPollingState || isCurrentRoomDeleted) {
         return;
       }
       isPollingState = true;
       try {
-        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`, {
+        const tokenParam = getRoomAuthToken(currentRoomId)
+          ? `&pt=${encodeURIComponent(getRoomAuthToken(currentRoomId))}`
+          : '';
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}${tokenParam}`, {
           cache: 'no-store'
         });
         if (res.ok && inFlightActions === 0) {
           const json = await res.json();
+          if (json.deleted) {
+            if (!hasExplicitRoomParam && !roomState && clientRole === 'SPEC') {
+              stopRealtimeConnections();
+              return;
+            }
+            handleRoomDeletedEvent(currentRoomId, false);
+            return;
+          }
+          if (json.locked) {
+            openRoomPasswordModal({
+              roomId: json.roomId || currentRoomId,
+              teamAName: json.teamAName,
+              teamBName: json.teamBName
+            });
+            return;
+          }
           if (json.ok && json.state) {
             connDot.classList.remove('offline');
             const serverRev = Number(json.state.revision || 0);
@@ -538,6 +959,7 @@
                   action: 'SYNC_SNAPSHOT',
                   role: clientRole,
                   team: clientTeam,
+                  authToken: getRoomAuthToken(currentRoomId),
                   clientSnapshot: roomState
                 })
               }).catch(() => { });
@@ -580,14 +1002,71 @@
     document.getElementById('mainMenuOverlay').classList.add('hidden');
   }
 
-  async function switchMatchRoom(newRoomId, initialSettings = null) {
+  async function switchMatchRoom(newRoomId, initialSettings = null, options = {}) {
     const cleanId = String(newRoomId || '').toUpperCase().replace(/[^A-Z0-9_-]/g, '').trim();
     if (!cleanId) {
       showToast('Vui lòng nhập Mã ID trận đấu hợp lệ.');
-      return;
+      return false;
+    }
+
+    if (options.isCreateRoom) {
+      sessionDeletedRooms.delete(cleanId);
+      if (initialSettings && initialSettings.passwordHash !== undefined) {
+        saveRoomAuthToken(cleanId, initialSettings.passwordHash);
+      }
+    }
+
+    // Kiểm tra trước trạng thái khóa mật khẩu / đã bị xóa trước khi chuyển phòng (nếu vào phòng có sẵn)
+    if (!options.isCreateRoom) {
+      if (firebaseDbUrl) {
+        try {
+          const r = await fetch(getFirebaseRoomEndpoint(cleanId));
+          if (r.ok) {
+            const fbRoom = await r.json();
+            if (fbRoom && fbRoom.passwordHash && getRoomAuthToken(cleanId) !== fbRoom.passwordHash) {
+              openRoomPasswordModal({
+                roomId: cleanId,
+                teamAName: fbRoom.teams?.A?.name,
+                teamBName: fbRoom.teams?.B?.name,
+                onUnlocked: options.onAfterEnter || null
+              });
+              return false;
+            }
+          }
+        } catch (e) { }
+      } else {
+        try {
+          const tokenParam = getRoomAuthToken(cleanId)
+            ? `&pt=${encodeURIComponent(getRoomAuthToken(cleanId))}`
+            : '';
+          const res = await fetch(`/api/state?room=${encodeURIComponent(cleanId)}${tokenParam}`, {
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const preCheck = await res.json();
+            if (preCheck.deleted) {
+              sessionDeletedRooms.add(cleanId);
+              removeRecentRoomLocal(cleanId);
+              loadActiveRoomsList();
+              showToast(`Phòng đấu [${cleanId}] đã kết thúc và bị xóa.`);
+              return false;
+            }
+            if (preCheck.locked) {
+              openRoomPasswordModal({
+                roomId: cleanId,
+                teamAName: preCheck.teamAName,
+                teamBName: preCheck.teamBName,
+                onUnlocked: options.onAfterEnter || null
+              });
+              return false;
+            }
+          }
+        } catch (e) { }
+      }
     }
 
     currentRoomId = cleanId;
+    isCurrentRoomDeleted = false;
     swapSource = null;
     roomState = null;
     lastStepIndex = -1;
@@ -597,6 +1076,8 @@
     Object.keys(domRenderCache).forEach((k) => {
       domRenderCache[k] = '';
     });
+
+    document.getElementById('btnCloseMainMenu')?.classList.remove('hidden');
 
     const fbQuery = firebaseDbUrl ? `&fb=${encodeURIComponent(firebaseDbUrl)}` : '';
     const newUrl = `${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}&role=${clientRole}${clientRole === 'PLAYER' ? `&team=${clientTeam}` : ''
@@ -610,11 +1091,28 @@
     connectRealtime();
 
     if (initialSettings) {
-      await sendAction('UPDATE_SETTINGS', initialSettings);
+      const actRes = await sendAction('UPDATE_SETTINGS', initialSettings, {
+        isCreateRoom: Boolean(options.isCreateRoom)
+      });
+      if (actRes && actRes.authRequired) {
+        return false;
+      }
     } else if (!firebaseDbUrl) {
       try {
-        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
+        const tokenParam = getRoomAuthToken(currentRoomId)
+          ? `&pt=${encodeURIComponent(getRoomAuthToken(currentRoomId))}`
+          : '';
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}${tokenParam}`);
         const json = await res.json();
+        if (json.locked) {
+          openRoomPasswordModal({
+            roomId: currentRoomId,
+            teamAName: json.teamAName,
+            teamBName: json.teamBName,
+            onUnlocked: options.onAfterEnter || null
+          });
+          return false;
+        }
         if (json.ok && json.state) {
           applyRoomState(json.state);
         }
@@ -623,6 +1121,10 @@
 
     closeMainMenu();
     showToast(`Đã vào phòng đấu [${currentRoomId}]`);
+    if (typeof options.onAfterEnter === 'function') {
+      options.onAfterEnter();
+    }
+    return true;
   }
 
   async function loadActiveRoomsList() {
@@ -630,7 +1132,11 @@
     if (!listContainer) return;
 
     const mergedMap = new Map();
-    getRecentRoomsLocal().forEach((r) => mergedMap.set(r.roomId, r));
+    const isLocalHost =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.startsWith('192.168.') ||
+      window.location.hostname.startsWith('10.');
 
     if (firebaseDbUrl) {
       try {
@@ -639,11 +1145,12 @@
           const allFb = await r.json();
           if (allFb && typeof allFb === 'object') {
             Object.entries(allFb).forEach(([k, val]) => {
-              if (val && typeof val === 'object') {
+              if (val && typeof val === 'object' && !sessionDeletedRooms.has(k)) {
                 mergedMap.set(k, {
                   roomId: k,
                   teamAName: val.teams?.A?.name || 'ĐỘI XANH',
                   teamBName: val.teams?.B?.name || 'ĐỘI ĐỎ',
+                  hasPassword: Boolean(val.passwordHash),
                   status: val.status || 'WAITING',
                   stepIndex: val.stepIndex || 0,
                   totalSteps: 26
@@ -652,17 +1159,31 @@
             });
           }
         }
-      } catch (e) { }
+      } catch (e) {
+        getRecentRoomsLocal().forEach((r) => mergedMap.set(r.roomId, r));
+      }
     } else {
+      if (!isLocalHost) {
+        getRecentRoomsLocal().forEach((r) => mergedMap.set(r.roomId, r));
+      }
       try {
-        const r = await fetch('/api/rooms');
+        const r = await fetch('/api/rooms', { cache: 'no-store' });
         if (r.ok) {
           const json = await r.json();
           if (json.ok && Array.isArray(json.rooms)) {
-            json.rooms.forEach((rm) => mergedMap.set(rm.roomId, rm));
+            if (isLocalHost) {
+              mergedMap.clear();
+            }
+            json.rooms.forEach((rm) => {
+              if (!sessionDeletedRooms.has(rm.roomId)) {
+                mergedMap.set(rm.roomId, rm);
+              }
+            });
           }
         }
-      } catch (e) { }
+      } catch (e) {
+        getRecentRoomsLocal().forEach((r) => mergedMap.set(r.roomId, r));
+      }
     }
 
     const roomsArr = Array.from(mergedMap.values());
@@ -681,10 +1202,11 @@
     listContainer.innerHTML = roomsArr
       .map((rm) => {
         const stText = statusLabelMap[rm.status] || rm.status;
+        const lockBadge = rm.hasPassword ? `<span class="room-lock-badge">🔒 CÓ PASS</span>` : '';
         return `
           <div class="room-list-card">
             <div>
-              <div class="room-card-id">ID: ${rm.roomId}</div>
+              <div class="room-card-id">ID: ${rm.roomId}${lockBadge}</div>
               <div class="room-card-teams">
                 <span class="text-blue">${rm.teamAName}</span>
                 <span style="color:var(--lol-grey); margin:0 6px;">vs</span>
@@ -714,9 +1236,10 @@
     });
 
     listContainer.querySelectorAll('.btn-links-room').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        await switchMatchRoom(btn.getAttribute('data-room-id'));
-        openSettingsModal();
+      btn.addEventListener('click', () => {
+        switchMatchRoom(btn.getAttribute('data-room-id'), null, {
+          onAfterEnter: () => openSettingsModal()
+        });
       });
     });
   }
@@ -1173,7 +1696,7 @@
     }
   }
 
-  async function stopDiscordScreenShare(teamKey) {
+  async function stopDiscordScreenShare(teamKey, silent = false) {
     if (localScreenStreams[teamKey]) {
       localScreenStreams[teamKey].getTracks().forEach((t) => t.stop());
       localScreenStreams[teamKey] = null;
@@ -1185,6 +1708,10 @@
     if (videoEl) {
       videoEl.srcObject = null;
       videoEl.classList.add('hidden');
+    }
+
+    if (silent) {
+      return;
     }
 
     await sendAction('UPDATE_STREAM_INFO', {
@@ -1341,6 +1868,11 @@
     const poolContainer = document.getElementById('championPoolContainer');
     const showcaseContainer = document.getElementById('spectatorCenterShowcase');
     const lockinBar = document.getElementById('lockinBar');
+    const btnEndMatchStream = document.getElementById('btnEndMatchStream');
+
+    if (btnEndMatchStream) {
+      btnEndMatchStream.classList.toggle('hidden', !(isStreamPhase && clientRole === 'SPEC'));
+    }
 
     if (isStreamPhase) {
       if (dualStreamStage) dualStreamStage.classList.remove('hidden');
@@ -1705,12 +2237,21 @@
     const btnStart = document.getElementById('btnStartMatch');
     const btnPause = document.getElementById('btnPauseMatch');
     const btnUndo = document.getElementById('btnUndoStep');
+    const btnEndToolbar = document.getElementById('btnEndMatchToolbar');
+    const lockIndicator = document.getElementById('roomLockIndicator');
+
     if (btnStart) btnStart.disabled = status !== 'WAITING';
     if (btnPause) {
       btnPause.disabled = status !== 'DRAFTING' && status !== 'LINEUP';
       btnPause.textContent = isPaused ? 'TIẾP TỤC' : 'TẠM DỪNG';
     }
     if (btnUndo) btnUndo.disabled = !roomState.canUndo;
+    if (btnEndToolbar) {
+      btnEndToolbar.classList.toggle('hidden', !(clientRole === 'SPEC' && status === 'COMPLETED'));
+    }
+    if (lockIndicator) {
+      lockIndicator.classList.toggle('hidden', !roomState.hasPassword);
+    }
 
     const btnConfirmTeamLineup = document.getElementById('btnConfirmTeamLineup');
     if (btnConfirmTeamLineup && clientRole === 'PLAYER') {
@@ -2293,16 +2834,70 @@
   function updateShareLinksInputs() {
     const fbInputVal = (document.getElementById('inputFirebaseUrl')?.value || firebaseDbUrl || '').trim().replace(/\/+$/, '');
     const fbQuery = fbInputVal ? `&fb=${encodeURIComponent(fbInputVal)}` : '';
-    const baseUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}${fbQuery}`;
+
+    const typedNewPass = (document.getElementById('inputRoomPassword')?.value || '').trim();
+    const embedChecked = document.getElementById('chkEmbedPassInLink')?.checked !== false;
+    let activeToken = '';
+    if (typedNewPass && window.DRAFT_ENGINE) {
+      activeToken = window.DRAFT_ENGINE.hashRoomPassword(typedNewPass);
+    } else if (!clearPasswordRequested && roomState?.hasPassword) {
+      activeToken = getRoomAuthToken(currentRoomId) || roomState.passwordHash || '';
+    }
+
+    const toggleWrap = document.getElementById('sharePassToggleWrap');
+    if (toggleWrap) {
+      toggleWrap.classList.toggle('hidden', !activeToken);
+    }
+
+    const ptQuery = embedChecked && activeToken ? `&pt=${encodeURIComponent(activeToken)}` : '';
+    const baseUrl = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(currentRoomId)}${fbQuery}${ptQuery}`;
     document.getElementById('shareLinkSpec').value = `${baseUrl}&role=SPEC`;
     document.getElementById('shareLinkTeamA').value = `${baseUrl}&role=PLAYER&team=A`;
     document.getElementById('shareLinkTeamB').value = `${baseUrl}&role=PLAYER&team=B`;
+  }
+
+  function refreshSettingsPasswordBadge() {
+    const statusBadge = document.getElementById('roomPassStatusBadge');
+    const btnClearPass = document.getElementById('btnClearRoomPassword');
+    const typedNewPass = (document.getElementById('inputRoomPassword')?.value || '').trim();
+    const currentlyHasPass = Boolean(roomState?.hasPassword);
+
+    if (typedNewPass) {
+      if (statusBadge) {
+        statusBadge.textContent = '🔒 SẼ ĐẶT PASS MỚI';
+        statusBadge.classList.add('is-locked');
+      }
+      if (btnClearPass) btnClearPass.classList.toggle('hidden', !currentlyHasPass);
+    } else if (clearPasswordRequested) {
+      if (statusBadge) {
+        statusBadge.textContent = 'SẼ GỠ PASS KHI LƯU';
+        statusBadge.classList.remove('is-locked');
+      }
+      if (btnClearPass) btnClearPass.classList.add('hidden');
+    } else if (currentlyHasPass) {
+      if (statusBadge) {
+        statusBadge.textContent = '🔒 ĐANG KHÓA PASS';
+        statusBadge.classList.add('is-locked');
+      }
+      if (btnClearPass) btnClearPass.classList.remove('hidden');
+    } else {
+      if (statusBadge) {
+        statusBadge.textContent = 'MỞ TỰ DO';
+        statusBadge.classList.remove('is-locked');
+      }
+      if (btnClearPass) btnClearPass.classList.add('hidden');
+    }
+    updateShareLinksInputs();
   }
 
   function openSettingsModal() {
     if (clientRole !== 'SPEC') return;
     const titleCode = document.getElementById('settingsRoomCodeTitle');
     if (titleCode) titleCode.textContent = currentRoomId;
+
+    clearPasswordRequested = false;
+    const passInput = document.getElementById('inputRoomPassword');
+    if (passInput) passInput.value = '';
 
     if (roomState) {
       document.getElementById('inputTeamAName').value = roomState.teams.A.name;
@@ -2313,7 +2908,7 @@
     }
     const fbInput = document.getElementById('inputFirebaseUrl');
     if (fbInput) fbInput.value = firebaseDbUrl;
-    updateShareLinksInputs();
+    refreshSettingsPasswordBadge();
     document.getElementById('settingsModal').classList.remove('hidden');
   }
 
@@ -2358,22 +2953,42 @@
       const banDuration = Number(document.getElementById('menuNewBanSec').value) || 45;
       const pickDuration = Number(document.getElementById('menuNewPickSec').value) || 60;
       const lineupDuration = Number(document.getElementById('menuNewLineupSec').value) || 90;
+      const newPassEl = document.getElementById('menuNewRoomPassword');
+      const rawNewPass = (newPassEl?.value || '').trim();
+      const passwordHash =
+        rawNewPass && window.DRAFT_ENGINE ? window.DRAFT_ENGINE.hashRoomPassword(rawNewPass) : '';
 
-      await switchMatchRoom(newId, {
-        teamAName,
-        teamBName,
-        banDuration,
-        pickDuration,
-        lineupDuration
-      });
+      if (newPassEl) newPassEl.value = '';
 
-      openSettingsModal();
+      const entered = await switchMatchRoom(
+        newId,
+        {
+          teamAName,
+          teamBName,
+          banDuration,
+          pickDuration,
+          lineupDuration,
+          passwordHash
+        },
+        { isCreateRoom: true }
+      );
+
+      if (entered) {
+        openSettingsModal();
+      }
     });
 
     document.getElementById('btnJoinRoomById').addEventListener('click', () => {
       const joinId = document.getElementById('menuJoinRoomInput').value;
       if (!joinId || !joinId.trim()) return;
       switchMatchRoom(joinId);
+    });
+    document.getElementById('menuJoinRoomInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const joinId = document.getElementById('menuJoinRoomInput').value;
+        if (joinId && joinId.trim()) switchMatchRoom(joinId);
+      }
     });
 
     document.getElementById('btnRefreshRooms').addEventListener('click', loadActiveRoomsList);
@@ -2520,8 +3135,33 @@
       }
     });
 
+    document.getElementById('btnEndMatchToolbar')?.addEventListener('click', endAndDeleteCurrentMatch);
+    document.getElementById('btnEndMatchStream')?.addEventListener('click', endAndDeleteCurrentMatch);
+
     document.getElementById('btnOpenSettings').addEventListener('click', openSettingsModal);
     document.getElementById('inputFirebaseUrl')?.addEventListener('input', updateShareLinksInputs);
+    document.getElementById('inputRoomPassword')?.addEventListener('input', refreshSettingsPasswordBadge);
+    document.getElementById('chkEmbedPassInLink')?.addEventListener('change', updateShareLinksInputs);
+    document.getElementById('btnClearRoomPassword')?.addEventListener('click', () => {
+      clearPasswordRequested = true;
+      const passInput = document.getElementById('inputRoomPassword');
+      if (passInput) passInput.value = '';
+      refreshSettingsPasswordBadge();
+    });
+
+    document.getElementById('btnConfirmUnlockRoom')?.addEventListener('click', submitUnlockRoomPassword);
+    document.getElementById('inputUnlockPassword')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        submitUnlockRoomPassword();
+      }
+    });
+    document.getElementById('btnCancelUnlockRoom')?.addEventListener('click', () => {
+      closeRoomPasswordModal();
+      if (clientRole === 'SPEC') {
+        openMainMenu();
+      }
+    });
 
     document.getElementById('btnLockIn').addEventListener('click', () => {
       if (!roomState?.hoveredCharId) return;
@@ -2625,7 +3265,7 @@
     document.getElementById('btnCloseSettingsModal').addEventListener('click', closeSettings);
     document.getElementById('btnCancelSettings').addEventListener('click', closeSettings);
 
-    document.getElementById('btnSaveSettings').addEventListener('click', () => {
+    document.getElementById('btnSaveSettings').addEventListener('click', async () => {
       if (clientRole !== 'SPEC') {
         closeSettings();
         return;
@@ -2639,13 +3279,29 @@
         connectRealtime();
       }
 
-      sendAction('UPDATE_SETTINGS', {
+      const settingsPayload = {
         teamAName: document.getElementById('inputTeamAName').value,
         teamBName: document.getElementById('inputTeamBName').value,
         banDuration: Number(document.getElementById('inputBanDuration').value),
         pickDuration: Number(document.getElementById('inputPickDuration').value),
         lineupDuration: Number(document.getElementById('inputLineupDuration').value)
+      };
+
+      const typedNewPass = (document.getElementById('inputRoomPassword')?.value || '').trim();
+      const prevAuthToken = getRoomAuthToken(currentRoomId);
+      if (typedNewPass && window.DRAFT_ENGINE) {
+        settingsPayload.passwordHash = window.DRAFT_ENGINE.hashRoomPassword(typedNewPass);
+      } else if (clearPasswordRequested) {
+        settingsPayload.passwordHash = '';
+      }
+
+      await sendAction('UPDATE_SETTINGS', settingsPayload, {
+        overrideAuthToken: prevAuthToken
       });
+      if (settingsPayload.passwordHash !== undefined) {
+        saveRoomAuthToken(currentRoomId, settingsPayload.passwordHash);
+        connectRealtime();
+      }
       closeSettings();
     });
 
@@ -2704,9 +3360,28 @@
 
     if (!firebaseDbUrl) {
       try {
-        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}`);
+        const tokenParam = getRoomAuthToken(currentRoomId)
+          ? `&pt=${encodeURIComponent(getRoomAuthToken(currentRoomId))}`
+          : '';
+        const res = await fetch(`/api/state?room=${encodeURIComponent(currentRoomId)}${tokenParam}`);
         const json = await res.json();
-        if (json.ok && json.state) {
+        if (json.deleted) {
+          if (hasExplicitRoomParam) {
+            handleRoomDeletedEvent(currentRoomId, false);
+          } else {
+            stopRealtimeConnections();
+          }
+        } else if (json.locked) {
+          if (hasExplicitRoomParam || clientRole === 'PLAYER') {
+            openRoomPasswordModal({
+              roomId: json.roomId || currentRoomId,
+              teamAName: json.teamAName,
+              teamBName: json.teamBName
+            });
+          } else {
+            stopRealtimeConnections();
+          }
+        } else if (json.ok && json.state) {
           applyRoomState(json.state);
         }
       } catch (e) {

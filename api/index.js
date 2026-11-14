@@ -2,6 +2,7 @@ const DraftEngine = require('../public/js/draft-engine.js');
 
 // Lưu trữ trạng thái phòng trên bộ nhớ Serverless instance (hoặc kết hợp Firebase Realtime DB ở phía Client)
 const rooms = global.__HOYO_ROOMS__ || (global.__HOYO_ROOMS__ = new Map());
+const deletedRooms = global.__HOYO_DELETED_ROOMS__ || (global.__HOYO_DELETED_ROOMS__ = new Map());
 
 function getRoom(roomId = 'MAIN') {
   const cleanId = String(roomId || 'MAIN').toUpperCase().trim() || 'MAIN';
@@ -47,26 +48,15 @@ module.exports = (req, res) => {
   }
 
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase();
-
-  // Trên Vercel Serverless không giữ kết nối SSE lâu dài để tránh treo function -> trả về 1 gói dữ liệu rồi đóng để client dùng polling 1s mượt mà
-  if (parsedUrl.pathname === '/api/events' && req.method === 'GET') {
-    const room = getRoom(roomId);
-    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    const initPayload = JSON.stringify({
-      type: 'STATE_UPDATE',
-      state: DraftEngine.getSerializedState(room)
-    });
-    res.status(200).end(`data: ${initPayload}\n\n`);
-    return;
-  }
+  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase().trim() || 'MAIN';
+  const queryPassToken = parsedUrl.searchParams.get('pt') || '';
 
   if (parsedUrl.pathname === '/api/rooms' && req.method === 'GET') {
     const list = Array.from(rooms.values()).map((r) => ({
       roomId: r.roomId,
       game: r.game,
       status: r.status,
+      hasPassword: Boolean(r.passwordHash),
       stepIndex: r.stepIndex,
       totalSteps: DraftEngine.DRAFT_STEPS.length,
       teamAName: r.teams?.A?.name || 'ĐỘI A',
@@ -81,9 +71,60 @@ module.exports = (req, res) => {
     return;
   }
 
-  if (req.method === 'GET') {
+  // Trên Vercel Serverless không giữ kết nối SSE lâu dài để tránh treo function -> trả về 1 gói dữ liệu rồi đóng
+  if (parsedUrl.pathname === '/api/events' && req.method === 'GET') {
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+
+    if (!rooms.has(roomId) && deletedRooms.has(roomId)) {
+      const delPayload = JSON.stringify({ type: 'ROOM_DELETED', deleted: true, roomId });
+      res.status(200).end(`data: ${delPayload}\n\n`);
+      return;
+    }
+
     const room = getRoom(roomId);
+    if (room.passwordHash && queryPassToken !== room.passwordHash) {
+      const lockPayload = JSON.stringify({
+        type: 'ROOM_LOCKED',
+        locked: true,
+        hasPassword: true,
+        roomId: room.roomId,
+        teamAName: room.teams?.A?.name || 'ĐỘI XANH',
+        teamBName: room.teams?.B?.name || 'ĐỘI ĐỎ'
+      });
+      res.status(200).end(`data: ${lockPayload}\n\n`);
+      return;
+    }
+
+    const initPayload = JSON.stringify({
+      type: 'STATE_UPDATE',
+      state: DraftEngine.getSerializedState(room)
+    });
+    res.status(200).end(`data: ${initPayload}\n\n`);
+    return;
+  }
+
+  if (req.method === 'GET') {
     res.setHeader('Cache-Control', 'no-store');
+
+    if (!rooms.has(roomId) && deletedRooms.has(roomId)) {
+      res.status(200).json({ ok: true, deleted: true, roomId });
+      return;
+    }
+
+    const room = getRoom(roomId);
+    if (room.passwordHash && queryPassToken !== room.passwordHash) {
+      res.status(200).json({
+        ok: true,
+        locked: true,
+        hasPassword: true,
+        roomId: room.roomId,
+        teamAName: room.teams?.A?.name || 'ĐỘI XANH',
+        teamBName: room.teams?.B?.name || 'ĐỘI ĐỎ'
+      });
+      return;
+    }
+
     res.status(200).json({
       ok: true,
       state: DraftEngine.getSerializedState(room)
@@ -102,13 +143,77 @@ module.exports = (req, res) => {
         body = {};
       }
       const targetRoomId = String(body.roomId || roomId || 'MAIN').toUpperCase().trim() || 'MAIN';
+
+      if (body.isCreateRoom) {
+        deletedRooms.delete(targetRoomId);
+      } else if (!rooms.has(targetRoomId) && deletedRooms.has(targetRoomId)) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(200).json({
+          ok: false,
+          deleted: true,
+          roomId: targetRoomId,
+          error: 'Trận đấu này đã kết thúc và phòng đã bị xóa.'
+        });
+        return;
+      }
+
       let targetRoom = getRoom(targetRoomId);
+
+      if (body.action === 'VERIFY_PASSWORD') {
+        const candidate = body.authToken || DraftEngine.hashRoomPassword(body.password || '');
+        res.setHeader('Cache-Control', 'no-store');
+        if (!targetRoom.passwordHash || candidate === targetRoom.passwordHash) {
+          res.status(200).json({
+            ok: true,
+            authToken: targetRoom.passwordHash || '',
+            state: DraftEngine.getSerializedState(targetRoom)
+          });
+        } else {
+          res.status(401).json({
+            ok: false,
+            authRequired: true,
+            error: 'Mật khẩu phòng không chính xác!'
+          });
+        }
+        return;
+      }
+
+      if (body.action === 'DELETE_ROOM') {
+        res.setHeader('Cache-Control', 'no-store');
+        if (body.role !== 'SPEC') {
+          res.status(403).json({
+            ok: false,
+            error: 'Chỉ người xem / Ban Tổ Chức mới có quyền kết thúc và xóa trận đấu!'
+          });
+          return;
+        }
+        if (targetRoom.passwordHash && body.authToken !== targetRoom.passwordHash) {
+          res.status(401).json({
+            ok: false,
+            authRequired: true,
+            error: 'Cần mở khóa mật khẩu phòng trước khi xóa trận đấu!'
+          });
+          return;
+        }
+        rooms.delete(targetRoomId);
+        deletedRooms.set(targetRoomId, Date.now());
+        res.status(200).json({
+          ok: true,
+          deleted: true,
+          roomId: targetRoomId
+        });
+        return;
+      }
 
       // Đồng bộ trạng thái mới nhất từ Client nếu request rơi vào một Serverless Instance khác bị cũ (cold/multi-instance)
       if (body.clientSnapshot && typeof body.clientSnapshot === 'object') {
         const snapRev = Number(body.clientSnapshot.revision || 0);
         const curRev = Number(targetRoom.revision || 0);
-        if (snapRev > curRev) {
+        const snapPass = String(body.clientSnapshot.passwordHash || '');
+        const canRestoreExisting = !targetRoom.passwordHash || body.authToken === targetRoom.passwordHash;
+        const canRestoreSnap = !snapPass || body.authToken === snapPass;
+
+        if (snapRev > curRev && canRestoreExisting && canRestoreSnap) {
           targetRoom = DraftEngine.normalizeRoomState(body.clientSnapshot, targetRoomId);
           targetRoom.lastTickAt = Date.now();
           rooms.set(targetRoomId, targetRoom);
@@ -117,6 +222,10 @@ module.exports = (req, res) => {
 
       if (body.action === 'SYNC_SNAPSHOT') {
         res.setHeader('Cache-Control', 'no-store');
+        if (targetRoom.passwordHash && body.authToken !== targetRoom.passwordHash) {
+          res.status(401).json({ ok: false, authRequired: true });
+          return;
+        }
         res.status(200).json({
           ok: true,
           state: DraftEngine.getSerializedState(targetRoom)
@@ -129,7 +238,7 @@ module.exports = (req, res) => {
       res.setHeader('Cache-Control', 'no-store');
       res.status(result.ok ? 200 : 400).json({
         ...result,
-        state: DraftEngine.getSerializedState(targetRoom)
+        state: result.authRequired ? undefined : DraftEngine.getSerializedState(targetRoom)
       });
     } catch (err) {
       res.status(400).json({ ok: false, error: 'Dữ liệu gửi lên không hợp lệ.' });
@@ -139,4 +248,3 @@ module.exports = (req, res) => {
 
   res.status(405).json({ ok: false, error: 'Method Not Allowed' });
 };
-

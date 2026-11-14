@@ -121,6 +121,7 @@
         <span class="sys-dot" id="connDot"></span>
         <span class="sys-label">ID:</span>
         <strong id="roomCodeLabel">MAIN</strong>
+        <span class="sys-lock-tag hidden" id="roomLockIndicator" title="Phòng có mật khẩu">🔒</span>
         <span class="sys-sync-tag" id="syncModeTag">LIVE</span>
       </div>
 
@@ -142,6 +143,7 @@
         <button type="button" class="sys-action-btn sys-btn-gold" id="btnEnterStreamPhase">STREAM</button>
         <button type="button" class="sys-action-btn" id="btnOpenSettings">CÀI ĐẶT</button>
         <button type="button" class="sys-action-btn sys-btn-red" id="btnResetMatch">RESET</button>
+        <button type="button" class="sys-action-btn sys-btn-end-match hidden" id="btnEndMatchToolbar" title="Kết thúc và xóa phòng đấu này">END TRẬN</button>
       </div>
 
       <!-- Thanh trạng thái khi là Tuyển thủ -->
@@ -309,6 +311,9 @@
             <div class="stream-topbar-actions">
               <button type="button" class="sys-action-btn" id="btnToggleStreamSplit">
                 ĐỔI BỐ CỤC
+              </button>
+              <button type="button" class="sys-action-btn sys-btn-end-match hidden" id="btnEndMatchStream">
+                END TRẬN &amp; XÓA PHÒNG
               </button>
             </div>
           </div>
@@ -543,6 +548,12 @@
               </div>
             </div>
 
+            <div class="form-section">
+              <label class="form-label">Mật khẩu phòng (Tùy chọn):</label>
+              <input type="password" id="menuNewRoomPassword" class="hextech-input"
+                placeholder="Để trống nếu mở tự do không cần pass..." maxlength="48" autocomplete="new-password" />
+            </div>
+
             <div class="settings-grid-2">
               <div class="form-section">
                 <label class="form-label text-blue">Tên Đội Xanh (Đi trước):</label>
@@ -693,13 +704,31 @@
         </div>
 
         <div class="form-section">
+          <div class="pass-label-row">
+            <label class="form-label">Mật khẩu bảo vệ phòng:</label>
+            <span class="room-pass-status" id="roomPassStatusBadge">MỞ TỰ DO</span>
+          </div>
+          <div class="input-with-btn">
+            <input type="password" id="inputRoomPassword" class="modal-input"
+              placeholder="Nhập mật khẩu mới (để trống nếu giữ nguyên)..." maxlength="48" autocomplete="new-password" />
+            <button type="button" class="sys-action-btn sys-btn-red hidden" id="btnClearRoomPassword">GỠ PASS</button>
+          </div>
+        </div>
+
+        <div class="form-section">
           <label class="form-label">Firebase Realtime Database URL (Đồng bộ Cloud Free 100%):</label>
           <input type="text" id="inputFirebaseUrl" class="modal-input"
             placeholder="https://ten-project-default-rtdb.asia-southeast1.firebasedatabase.app" />
         </div>
 
         <div class="share-links-box">
-          <div class="form-label">Đường dẫn theo vai trò (Gửi cho Tuyển thủ 2 đội):</div>
+          <div class="share-links-header">
+            <div class="form-label">Đường dẫn theo vai trò (Gửi cho Tuyển thủ 2 đội):</div>
+            <label class="share-pass-toggle" id="sharePassToggleWrap">
+              <input type="checkbox" id="chkEmbedPassInLink" checked />
+              <span>Kèm mã mở khóa vào link mời</span>
+            </label>
+          </div>
           <div class="share-link-row">
             <span>Ban Tổ Chức / Stream:</span>
             <input type="text" id="shareLinkSpec" class="modal-input" readonly />
@@ -721,6 +750,32 @@
       <div class="modal-footer">
         <button type="button" class="sys-action-btn" id="btnCancelSettings">ĐÓNG</button>
         <button type="button" class="sys-action-btn sys-btn-gold" id="btnSaveSettings">LƯU CÀI ĐẶT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: XÁC THỰC MẬT KHẨU PHÒNG -->
+  <div class="modal-backdrop hidden" id="roomPasswordModal">
+    <div class="modal-card modal-card-compact">
+      <div class="modal-header">
+        <div>
+          <h3>PHÒNG ĐẤU CÓ MẬT KHẨU (<span id="unlockRoomIdLabel">MAIN</span>)</h3>
+          <p class="modal-subtitle" id="unlockRoomTeamsLabel">Vui lòng nhập mật khẩu để vào phòng đấu</p>
+        </div>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-section">
+          <label class="form-label">Mật khẩu phòng:</label>
+          <input type="password" id="inputUnlockPassword" class="modal-input" placeholder="Nhập mật khẩu phòng..."
+            maxlength="48" autocomplete="off" />
+          <div class="unlock-error-msg hidden" id="unlockErrorText">Mật khẩu phòng không chính xác!</div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="sys-action-btn" id="btnCancelUnlockRoom">QUAY LẠI SẢNH</button>
+        <button type="button" class="sys-action-btn sys-btn-gold" id="btnConfirmUnlockRoom">VÀO PHÒNG</button>
       </div>
     </div>
   </div>

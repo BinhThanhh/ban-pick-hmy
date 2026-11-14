@@ -17,6 +17,7 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DRAFT_STEPS = DraftEngine.DRAFT_STEPS;
 
 const rooms = new Map();
+const deletedRooms = new Map();
 rooms.set('MAIN', DraftEngine.createInitialRoomState('MAIN'));
 
 function getRoom(roomId = 'MAIN') {
@@ -34,6 +35,35 @@ function getSerializedState(room) {
 const sseClients = new Set();
 const wsClients = new Set();
 
+function broadcastRoomDeleted(targetRoomId) {
+  const payload = JSON.stringify({
+    type: 'ROOM_DELETED',
+    deleted: true,
+    roomId: targetRoomId
+  });
+
+  for (const client of sseClients) {
+    if (client.roomId === targetRoomId) {
+      try {
+        client.res.write(`data: ${payload}\n\n`);
+      } catch (e) {
+        sseClients.delete(client);
+      }
+    }
+  }
+
+  const wsFrame = encodeWsFrame(payload);
+  for (const client of wsClients) {
+    if (client.roomId === targetRoomId && client.socket.writable) {
+      try {
+        client.socket.write(wsFrame);
+      } catch (e) {
+        wsClients.delete(client);
+      }
+    }
+  }
+}
+
 function broadcastRoomState(room) {
   const payload = JSON.stringify({
     type: 'STATE_UPDATE',
@@ -42,6 +72,9 @@ function broadcastRoomState(room) {
 
   for (const client of sseClients) {
     if (client.roomId === room.roomId) {
+      if (room.passwordHash && client.passToken !== room.passwordHash) {
+        continue;
+      }
       try {
         client.res.write(`data: ${payload}\n\n`);
       } catch (e) {
@@ -53,6 +86,9 @@ function broadcastRoomState(room) {
   const wsFrame = encodeWsFrame(payload);
   for (const client of wsClients) {
     if (client.roomId === room.roomId && client.socket.writable) {
+      if (room.passwordHash && client.passToken !== room.passwordHash) {
+        continue;
+      }
       try {
         client.socket.write(wsFrame);
       } catch (e) {
@@ -152,7 +188,8 @@ const MIME_TYPES = {
 const server = http.createServer((req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
-  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase();
+  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase().trim() || 'MAIN';
+  const queryPassToken = parsedUrl.searchParams.get('pt') || '';
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -169,6 +206,7 @@ const server = http.createServer((req, res) => {
       roomId: r.roomId,
       game: r.game,
       status: r.status,
+      hasPassword: Boolean(r.passwordHash),
       stepIndex: r.stepIndex,
       totalSteps: DRAFT_STEPS.length,
       teamAName: r.teams?.A?.name || 'ĐỘI A',
@@ -184,21 +222,57 @@ const server = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/state' && req.method === 'GET') {
-    const room = getRoom(roomId);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    if (!rooms.has(roomId) && deletedRooms.has(roomId)) {
+      res.end(JSON.stringify({ ok: true, deleted: true, roomId }));
+      return;
+    }
+    const room = getRoom(roomId);
+    if (room.passwordHash && queryPassToken !== room.passwordHash) {
+      res.end(
+        JSON.stringify({
+          ok: true,
+          locked: true,
+          hasPassword: true,
+          roomId: room.roomId,
+          teamAName: room.teams?.A?.name || 'ĐỘI XANH',
+          teamBName: room.teams?.B?.name || 'ĐỘI ĐỎ'
+        })
+      );
+      return;
+    }
     res.end(JSON.stringify({ ok: true, state: getSerializedState(room) }));
     return;
   }
 
   if (pathname === '/api/events' && req.method === 'GET') {
-    const room = getRoom(roomId);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive'
     });
 
-    const client = { roomId: room.roomId, res };
+    if (!rooms.has(roomId) && deletedRooms.has(roomId)) {
+      res.end(`data: ${JSON.stringify({ type: 'ROOM_DELETED', deleted: true, roomId })}\n\n`);
+      return;
+    }
+
+    const room = getRoom(roomId);
+    if (room.passwordHash && queryPassToken !== room.passwordHash) {
+      res.end(
+        `data: ${JSON.stringify({
+          type: 'ROOM_LOCKED',
+          locked: true,
+          hasPassword: true,
+          roomId: room.roomId,
+          teamAName: room.teams?.A?.name || 'ĐỘI XANH',
+          teamBName: room.teams?.B?.name || 'ĐỘI ĐỎ'
+        })}\n\n`
+      );
+      return;
+    }
+
+    const client = { roomId: room.roomId, passToken: queryPassToken, res };
     sseClients.add(client);
 
     const initPayload = JSON.stringify({
@@ -222,10 +296,93 @@ const server = http.createServer((req, res) => {
     req.on('end', () => {
       try {
         const body = JSON.parse(rawBody || '{}');
-        const targetRoom = getRoom(body.roomId || roomId);
+        const targetRoomId = String(body.roomId || roomId || 'MAIN').toUpperCase().trim() || 'MAIN';
+
+        if (body.isCreateRoom) {
+          deletedRooms.delete(targetRoomId);
+        } else if (!rooms.has(targetRoomId) && deletedRooms.has(targetRoomId)) {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              deleted: true,
+              roomId: targetRoomId,
+              error: 'Trận đấu này đã kết thúc và phòng đã bị xóa.'
+            })
+          );
+          return;
+        }
+
+        const targetRoom = getRoom(targetRoomId);
+
+        if (body.action === 'VERIFY_PASSWORD') {
+          const candidate = body.authToken || DraftEngine.hashRoomPassword(body.password || '');
+          if (!targetRoom.passwordHash || candidate === targetRoom.passwordHash) {
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(
+              JSON.stringify({
+                ok: true,
+                authToken: targetRoom.passwordHash || '',
+                state: getSerializedState(targetRoom)
+              })
+            );
+          } else {
+            res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(
+              JSON.stringify({
+                ok: false,
+                authRequired: true,
+                error: 'Mật khẩu phòng không chính xác!'
+              })
+            );
+          }
+          return;
+        }
+
+        if (body.action === 'DELETE_ROOM') {
+          if (body.role !== 'SPEC') {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: 'Chỉ người xem / Ban Tổ Chức mới có quyền kết thúc và xóa trận đấu!'
+              })
+            );
+            return;
+          }
+          if (targetRoom.passwordHash && body.authToken !== targetRoom.passwordHash) {
+            res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(
+              JSON.stringify({
+                ok: false,
+                authRequired: true,
+                error: 'Cần mở khóa mật khẩu phòng trước khi xóa trận đấu!'
+              })
+            );
+            return;
+          }
+          rooms.delete(targetRoomId);
+          deletedRooms.set(targetRoomId, Date.now());
+          broadcastRoomDeleted(targetRoomId);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: true, deleted: true, roomId: targetRoomId }));
+          return;
+        }
+
+        if (body.action === 'SYNC_SNAPSHOT') {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: true, state: getSerializedState(targetRoom) }));
+          return;
+        }
+
         const result = handleClientAction(targetRoom, body);
         res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ ...result, state: getSerializedState(targetRoom) }));
+        res.end(
+          JSON.stringify({
+            ...result,
+            state: result.authRequired ? undefined : getSerializedState(targetRoom)
+          })
+        );
       } catch (err) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: false, error: 'Dữ liệu gửi lên không hợp lệ.' }));
@@ -269,8 +426,8 @@ server.on('upgrade', (req, socket) => {
   }
 
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase();
-  const room = getRoom(roomId);
+  const roomId = (parsedUrl.searchParams.get('room') || 'MAIN').toUpperCase().trim() || 'MAIN';
+  const queryPassToken = parsedUrl.searchParams.get('pt') || '';
 
   const acceptKey = crypto
     .createHash('sha1')
@@ -287,17 +444,39 @@ server.on('upgrade', (req, socket) => {
     ].join('\r\n')
   );
 
-  const client = { roomId: room.roomId, socket };
+  if (!rooms.has(roomId) && deletedRooms.has(roomId)) {
+    socket.write(encodeWsFrame(JSON.stringify({ type: 'ROOM_DELETED', deleted: true, roomId })));
+    socket.end();
+    return;
+  }
+
+  const room = getRoom(roomId);
+  const client = { roomId: room.roomId, passToken: queryPassToken, socket };
   wsClients.add(client);
 
-  socket.write(
-    encodeWsFrame(
-      JSON.stringify({
-        type: 'STATE_UPDATE',
-        state: getSerializedState(room)
-      })
-    )
-  );
+  if (room.passwordHash && queryPassToken !== room.passwordHash) {
+    socket.write(
+      encodeWsFrame(
+        JSON.stringify({
+          type: 'ROOM_LOCKED',
+          locked: true,
+          hasPassword: true,
+          roomId: room.roomId,
+          teamAName: room.teams?.A?.name || 'ĐỘI XANH',
+          teamBName: room.teams?.B?.name || 'ĐỘI ĐỎ'
+        })
+      )
+    );
+  } else {
+    socket.write(
+      encodeWsFrame(
+        JSON.stringify({
+          type: 'STATE_UPDATE',
+          state: getSerializedState(room)
+        })
+      )
+    );
+  }
 
   socket.on('data', (buffer) => {
     try {
